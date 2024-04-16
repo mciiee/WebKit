@@ -32,7 +32,8 @@ jobs:
       
       - run: | 
           sudo apt update
-          sudo apt upgrade -ysudo apt install isocodes -y
+          sudo apt upgrade -y
+          sudo apt install isocodes -y
           sudo apt install cairo -y
           sudo apt install curl -y
           sudo apt install icu -y
