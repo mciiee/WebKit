@@ -1,5 +1,5 @@
 {
-  description = "Webkit build flake";
+  description = "Webkit build";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
@@ -17,7 +17,7 @@
                 isocodes
                 cairo
                 curl
-                icu    	
+                icu      
                 libjpeg
                 libxml2
                 openssl
@@ -30,8 +30,10 @@
                 openjpeg
                 woff2
                 libwebp
-                libxslt 
-	      ];
+                libxslt
+                
+                gperf
+              ];
               nativeBuildInputs = with pkgs; [
                 # building
                 meson
@@ -46,10 +48,11 @@
                 ruby
                 python39
                 #libraries
-             ];
+              ];
               shellHook =
-                'echo "Done flaking, starting to build" && Tools/Scripts/build-webkit --debug --wincairo';
+                #"deno run --allow-read build.ts"
+                # "meson setup build && ninja -C build"
+                "echo Done";
             };
         };
 }
-
