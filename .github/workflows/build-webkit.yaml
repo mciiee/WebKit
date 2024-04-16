@@ -37,13 +37,19 @@ jobs:
       - name: Update apt
         run: sudo apt-get update && sudo apt-get upgrade -y
       
-      - name: Install perl, cmake, ninja
-        run: sudo apt install perl cmake ninja-build
-    
+      - name: Install nix
+        run: sh <(curl -L https://nixos.org/nix/install) --daemon
+      
+      - name: Update nix channel
+        run: nix-channel --update
+
+      - name: Start nix flake
+        run: nix develop --experimental-features 'nix-command flakes'
+      
       # Runs a set of commands using the runners shell
-      - name: Build
-        run: |
-          Tools/Scripts/build-webkit --wincairo --debug
+      #- name: Build
+      #  run: |
+      #    Tools/Scripts/build-webkit --wincairo --debug
       #    cmake -GNinja -DPORT=WinCairo -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_MINIBROWSER=ON ..
       #    ninja
           
