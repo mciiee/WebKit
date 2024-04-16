@@ -52,7 +52,7 @@
               shellHook =
                 #"deno run --allow-read build.ts"
                 # "meson setup build && ninja -C build"
-                'echo "Done downloading" && Tools/Scripts/build-webkit --debug --wincairo';
+                  "echo \"Done downloading\" && Tools/Scripts/build-webkit --debug --wincairo";
             };
         };
 }
