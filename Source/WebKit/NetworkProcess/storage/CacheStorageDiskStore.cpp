@@ -54,7 +54,7 @@ static bool shouldStoreBodyAsBlob(const Vector<uint8_t>& bodyData)
 static SHA1::Digest computeSHA1(std::span<const uint8_t> span, FileSystem::Salt salt)
 {
     SHA1 sha1;
-    sha1.addBytes(salt.data(), salt.size());
+    sha1.addBytes(salt);
     sha1.addBytes(span);
     SHA1::Digest digest;
     sha1.computeHash(digest);
@@ -313,13 +313,13 @@ std::optional<CacheStorageRecord> CacheStorageDiskStore::readRecordFromFileData(
         if (bodyOffset + bodySize != buffer.size())
             return std::nullopt;
 
-        auto bodyData = std::span(buffer.data() + bodyOffset, bodySize);
+        auto bodyData = buffer.subspan(bodyOffset, bodySize);
         if (storedInfo->metaData.bodyHash != computeSHA1(bodyData, m_salt))
             return std::nullopt;
 
         // FIXME: avoid copying inline body data here, perhaps by adding offset support to
         // MappedFileData, or by taking a read-only virtual copy of bodyData.
-        responseBody = WebCore::SharedBuffer::create(bodyData.data(), bodyData.size());
+        responseBody = WebCore::SharedBuffer::create(bodyData);
     } else {
         if (!blobBuffer)
             return std::nullopt;

@@ -158,7 +158,7 @@ public:
     enum class LockdownMode : bool { Disabled, Enabled };
 
     static Ref<WebProcessProxy> create(WebProcessPool&, WebsiteDataStore*, LockdownMode, IsPrewarmed, WebCore::CrossOriginMode = WebCore::CrossOriginMode::Shared, ShouldLaunchProcess = ShouldLaunchProcess::Yes);
-    static Ref<WebProcessProxy> createForRemoteWorkers(RemoteWorkerType, WebProcessPool&, WebCore::RegistrableDomain&&, WebsiteDataStore&);
+    static Ref<WebProcessProxy> createForRemoteWorkers(RemoteWorkerType, WebProcessPool&, WebCore::RegistrableDomain&&, WebsiteDataStore&, LockdownMode);
 
     ~WebProcessProxy();
 
@@ -223,6 +223,7 @@ public:
     void removeRemotePageProxy(RemotePageProxy&);
 
     Vector<Ref<WebPageProxy>> pages() const;
+    Vector<Ref<WebPageProxy>> mainPages() const;
     unsigned pageCount() const { return m_pageMap.size(); }
     unsigned provisionalPageCount() const { return m_provisionalPages.computeSize(); }
     unsigned visiblePageCount() const { return m_visiblePageCounter.value(); }
@@ -305,8 +306,6 @@ public:
 #endif
 
     void windowServerConnectionStateChanged();
-
-    void setIsHoldingLockedFiles(bool);
 
     void isResponsive(CompletionHandler<void(bool isWebProcessResponsive)>&&);
     void isResponsiveWithLazyStop();
@@ -486,7 +485,7 @@ public:
 
 #if PLATFORM(COCOA)
     std::optional<audit_token_t> auditToken() const;
-    Vector<SandboxExtension::Handle> fontdMachExtensionHandles(SandboxExtension::MachBootstrapOptions) const;
+    std::optional<Vector<SandboxExtension::Handle>> fontdMachExtensionHandles();
 #endif
 
     bool isConnectedToHardwareConsole() const { return m_isConnectedToHardwareConsole; }
@@ -500,8 +499,6 @@ public:
 
     static void permissionChanged(WebCore::PermissionName, const WebCore::SecurityOriginData&);
     void processPermissionChanged(WebCore::PermissionName, const WebCore::SecurityOriginData&);
-
-    void addAllowedFirstPartyForCookies(const WebCore::RegistrableDomain&);
 
     Logger& logger();
 
@@ -554,7 +551,7 @@ private:
 
     // IPC message handlers.
     void updateBackForwardItem(const BackForwardListItemState&);
-    void didDestroyFrame(WebCore::FrameIdentifier, WebPageProxyIdentifier);
+    void didDestroyFrame(IPC::Connection&, WebCore::FrameIdentifier, WebPageProxyIdentifier);
     void didDestroyUserGestureToken(WebCore::PageIdentifier, uint64_t);
 
     bool canBeAddedToWebProcessCache() const;
@@ -683,7 +680,6 @@ private:
     WeakHashSet<WebUserContentControllerProxy> m_webUserContentControllerProxies;
 
     int m_numberOfTimesSuddenTerminationWasDisabled;
-    std::unique_ptr<ProcessThrottler::BackgroundActivity> m_activityForHoldingLockedFiles;
     ForegroundWebProcessToken m_foregroundToken;
     BackgroundWebProcessToken m_backgroundToken;
     bool m_areThrottleStateChangesEnabled { true };
@@ -720,6 +716,7 @@ private:
     WebCore::CrossOriginMode m_crossOriginMode { WebCore::CrossOriginMode::Shared };
 #if PLATFORM(COCOA)
     bool m_hasNetworkExtensionSandboxAccess { false };
+    bool m_sentFontdMachExtensionHandles { false };
 #endif
 
 #if PLATFORM(WATCHOS)

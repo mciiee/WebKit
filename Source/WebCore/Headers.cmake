@@ -925,6 +925,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     dom/ContextDestructionObserver.h
     dom/ContextDestructionObserverInlines.h
     dom/CrossOriginMode.h
+    dom/CustomElementDefaultARIA.h
     dom/CustomElementReactionQueue.h
     dom/DOMException.h
     dom/DOMHighResTimeStamp.h
@@ -984,6 +985,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     dom/FragmentDirectiveRangeFinder.h
     dom/FullscreenManager.h
     dom/GCReachableRef.h
+    dom/GetHTMLOptions.h
     dom/ImageOverlay.h
     dom/InlineStyleSheetOwner.h
     dom/InvokeEvent.h
@@ -1069,6 +1071,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     dom/UserTypingGestureIndicator.h
     dom/ValidityStateFlags.h
     dom/ViewTransition.h
+    dom/VisibilityAdjustment.h
     dom/ViewTransitionUpdateCallback.h
     dom/ViewportArguments.h
     dom/VisibilityChangeClient.h
@@ -1266,6 +1269,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     html/PermissionsPolicy.h
     html/PluginDocument.h
     html/StepRange.h
+    html/SwitchTrigger.h
     html/TimeRanges.h
     html/TypeAhead.h
     html/URLDecomposition.h
@@ -1504,7 +1508,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     page/DragController.h
     page/DummySpeechRecognitionProvider.h
     page/EditorClient.h
-    page/ElementTargeting.h
+    page/ElementTargetingController.h
     page/ElementTargetingTypes.h
     page/EventHandler.h
     page/FocusController.h
@@ -1825,6 +1829,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/audio/AudioStreamDescription.h
     platform/audio/AudioUtilities.h
     platform/audio/NowPlayingInfo.h
+    platform/audio/NowPlayingMetadataObserver.h
     platform/audio/PlatformAudioData.h
     platform/audio/PlatformMediaSession.h
     platform/audio/PlatformMediaSessionManager.h
@@ -2333,6 +2338,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     rendering/HitTestLocation.h
     rendering/HitTestRequest.h
     rendering/HitTestResult.h
+    rendering/HitTestSource.h
     rendering/LayerAncestorClippingStack.h
     rendering/LayerFragment.h
     rendering/LegacyInlineBox.h
@@ -2409,6 +2415,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     rendering/style/GridArea.h
     rendering/style/GridLength.h
     rendering/style/GridPosition.h
+    rendering/style/GridPositionsResolver.h
     rendering/style/GridTrackSize.h
     rendering/style/LineClampValue.h
     rendering/style/ListStyleType.h

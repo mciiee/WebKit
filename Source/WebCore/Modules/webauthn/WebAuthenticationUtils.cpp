@@ -186,7 +186,7 @@ Ref<ArrayBuffer> buildClientDataJson(ClientDataType type, const BufferSource& ch
 Vector<uint8_t> buildClientDataJsonHash(const ArrayBuffer& clientDataJson)
 {
     auto crypto = PAL::CryptoDigest::create(PAL::CryptoDigest::Algorithm::SHA_256);
-    crypto->addBytes(clientDataJson.data(), clientDataJson.byteLength());
+    crypto->addBytes(clientDataJson.span());
     return crypto->computeHash();
 }
 
@@ -228,6 +228,24 @@ String toString(AuthenticatorTransport transport)
     return nullString();
 }
 
+std::optional<AuthenticatorTransport> convertStringToAuthenticatorTransport(const String& transport)
+{
+    if (transport == authenticatorTransportUsb)
+        return AuthenticatorTransport::Usb;
+    if (transport == authenticatorTransportNfc)
+        return AuthenticatorTransport::Nfc;
+    if (transport == authenticatorTransportBle)
+        return AuthenticatorTransport::Ble;
+    if (transport == authenticatorTransportInternal)
+        return AuthenticatorTransport::Internal;
+    if (transport == authenticatorTransportCable)
+        return AuthenticatorTransport::Cable;
+    if (transport == authenticatorTransportHybrid)
+        return AuthenticatorTransport::Hybrid;
+    if (transport == authenticatorTransportSmartCard)
+        return AuthenticatorTransport::SmartCard;
+    return std::nullopt;
+}
 
 } // namespace WebCore
 

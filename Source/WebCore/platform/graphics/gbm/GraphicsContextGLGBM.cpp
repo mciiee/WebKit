@@ -32,6 +32,7 @@
 #include "ANGLEHeaders.h"
 #include "DMABufEGLUtilities.h"
 #include "GBMDevice.h"
+#include "GLFence.h"
 #include "Logging.h"
 #include "PixelBuffer.h"
 
@@ -106,6 +107,8 @@ void GraphicsContextGLGBM::prepareForDisplay()
 
     m_swapchain.displayBO = WTFMove(m_swapchain.drawBO);
     allocateDrawBufferObject();
+
+    m_frameFence = GLFence::create();
 }
 
 bool GraphicsContextGLGBM::platformInitializeContext()
@@ -288,6 +291,17 @@ void GraphicsContextGLGBM::allocateDrawBufferObject()
 
     GL_BindTexture(textureTarget, m_texture);
     GL_EGLImageTargetTexture2DOES(textureTarget, result.iterator->value);
+}
+
+bool GraphicsContextGLGBM::addFoveation(IntSize, IntSize, IntSize, std::span<const GCGLfloat>, std::span<const GCGLfloat>, std::span<const GCGLfloat>)
+{
+    return false;
+}
+void GraphicsContextGLGBM::enableFoveation(GCGLuint)
+{
+}
+void GraphicsContextGLGBM::disableFoveation()
+{
 }
 
 GraphicsContextGLGBM::Swapchain::Swapchain(GCGLDisplay platformDisplay)

@@ -1341,6 +1341,7 @@ void RenderCommandEncoder::reset()
     CommandEncoder::reset();
     mRecording        = false;
     mPipelineStateSet = false;
+    setRasterizationRateMap(nil);
     mCommands.clear();
 }
 
@@ -1755,8 +1756,26 @@ RenderCommandEncoder &RenderCommandEncoder::setStencilRefVal(uint32_t ref)
     return setStencilRefVals(ref, ref);
 }
 
-RenderCommandEncoder &RenderCommandEncoder::setViewport(const MTLViewport &viewport)
+RenderCommandEncoder &RenderCommandEncoder::setViewport(const MTLViewport &intialViewport,
+                                                        id<MTLRasterizationRateMap> map)
 {
+    auto viewport = intialViewport;
+    if (map)
+    {
+        auto adjustedOrigin =
+            [map mapPhysicalToScreenCoordinates:MTLCoordinate2DMake(viewport.originX, (int)viewport.originY)
+                                       forLayer:0];
+        auto adjustedSize =
+            [map mapPhysicalToScreenCoordinates:MTLCoordinate2DMake(viewport.width, viewport.height)
+                                       forLayer:0];
+
+        viewport.originX      = std::max<double>(0, adjustedOrigin.x);
+        viewport.originY      = std::max<double>(0, adjustedOrigin.y);
+        MTLSize screenSize = [map screenSize];
+        viewport.width  = std::min<double>(screenSize.width, ceilf(adjustedSize.x));
+        viewport.height = std::min<double>(screenSize.height, ceilf(adjustedSize.y));
+    }
+
     if (mStateCache.viewport.valid() && mStateCache.viewport.value() == viewport)
     {
         return *this;
@@ -1768,12 +1787,22 @@ RenderCommandEncoder &RenderCommandEncoder::setViewport(const MTLViewport &viewp
     return *this;
 }
 
-RenderCommandEncoder &RenderCommandEncoder::setScissorRect(const MTLScissorRect &rect)
+RenderCommandEncoder &RenderCommandEncoder::setScissorRect(const MTLScissorRect &rect, id<MTLRasterizationRateMap> map)
 {
+    auto maxScissorRect =
+        MTLCoordinate2DMake(mRenderPassMaxScissorRect.width, mRenderPassMaxScissorRect.height);
+
+    if (map)
+    {
+        maxScissorRect = [map mapPhysicalToScreenCoordinates:maxScissorRect forLayer:0];
+        if (!(rect.width * rect.height))
+            return *this;
+    }
+
     NSUInteger clampedWidth =
-        rect.x > mRenderPassMaxScissorRect.width ? 0 : mRenderPassMaxScissorRect.width - rect.x;
+        rect.x > maxScissorRect.x ? 0 : (NSUInteger)ceilf(maxScissorRect.x) - rect.x;
     NSUInteger clampedHeight =
-        rect.y > mRenderPassMaxScissorRect.height ? 0 : mRenderPassMaxScissorRect.height - rect.y;
+        rect.y > maxScissorRect.y ? 0 : (NSUInteger)ceilf(maxScissorRect.y) - rect.y;
 
     MTLScissorRect clampedRect = {rect.x, rect.y, std::min(rect.width, clampedWidth),
                                   std::min(rect.height, clampedHeight)};
@@ -1784,6 +1813,23 @@ RenderCommandEncoder &RenderCommandEncoder::setScissorRect(const MTLScissorRect 
     }
 
     mStateCache.scissorRect = clampedRect;
+
+    if (map)
+    {
+        auto adjustedOrigin =
+            [map mapPhysicalToScreenCoordinates:MTLCoordinate2DMake(clampedRect.x, clampedRect.y)
+                                       forLayer:0];
+        auto adjustedSize =
+            [map mapPhysicalToScreenCoordinates:MTLCoordinate2DMake(clampedRect.width,
+                                                                    clampedRect.height)
+                                       forLayer:0];
+
+        clampedRect.x      = (NSUInteger)floorf(adjustedOrigin.x);
+        clampedRect.y      = (NSUInteger)floorf(adjustedOrigin.y);
+        MTLSize screenSize = [map screenSize];
+        clampedRect.width  = std::min<NSUInteger>(screenSize.width, ceilf(adjustedSize.x));
+        clampedRect.height = std::min<NSUInteger>(screenSize.height, ceilf(adjustedSize.y));
+    }
 
     mCommands.push(CmdType::SetScissorRect).push(clampedRect);
 
@@ -2191,6 +2237,17 @@ void RenderCommandEncoder::popDebugGroup()
     mCommands.push(CmdType::PopDebugGroup);
 }
 
+id<MTLRasterizationRateMap> RenderCommandEncoder::rasterizationRateMapForPass(id<MTLRasterizationRateMap> map,
+                                                                              id<MTLTexture> texture) const
+{
+    if (!mCachedRenderPassDescObjC.get())
+        return nil;
+
+    MTLSize size = [map physicalSizeForLayer:0];
+    id<MTLTexture> t = mCachedRenderPassDescObjC.get().colorAttachments[0].texture;
+    return t.width == size.width && t.height == size.height ? map : nil;
+}
+
 RenderCommandEncoder &RenderCommandEncoder::setColorStoreAction(MTLStoreAction action,
                                                                 uint32_t colorAttachmentIndex)
 {
@@ -2283,6 +2340,16 @@ RenderCommandEncoder &RenderCommandEncoder::setStencilLoadAction(MTLLoadAction a
         mCachedRenderPassDescObjC.get().stencilAttachment.loadAction   = action;
         mCachedRenderPassDescObjC.get().stencilAttachment.clearStencil = clearVal;
     }
+    return *this;
+}
+
+RenderCommandEncoder &RenderCommandEncoder::setRasterizationRateMap(id<MTLRasterizationRateMap> map)
+{
+    if (map != mCachedRenderPassDescObjC.get().rasterizationRateMap)
+    {
+        mCachedRenderPassDescObjC.get().rasterizationRateMap = map;
+    }
+
     return *this;
 }
 

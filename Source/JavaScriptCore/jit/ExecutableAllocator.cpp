@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -164,7 +164,7 @@ static bool isJITEnabled()
 {
     bool jitEnabled = !g_jscConfig.jitDisabled;
 #if HAVE(IOS_JIT_RESTRICTIONS)
-    jitEnabled = jitEnabled && processHasEntitlement("dynamic-codesigning"_s);
+    jitEnabled = jitEnabled && (processHasEntitlement("dynamic-codesigning"_s) || processHasEntitlement("com.apple.developer.cs.allow-jit"_s));
 #elif HAVE(MAC_JIT_RESTRICTIONS) && USE(APPLE_INTERNAL_SDK)
     jitEnabled = jitEnabled && processHasEntitlement("com.apple.security.cs.allow-jit"_s);
 #endif
@@ -184,7 +184,7 @@ void ExecutableAllocator::disableJIT()
 
 #if HAVE(IOS_JIT_RESTRICTIONS) || HAVE(MAC_JIT_RESTRICTIONS) && USE(APPLE_INTERNAL_SDK)
 #if HAVE(IOS_JIT_RESTRICTIONS)
-    bool shouldDisableJITMemory = processHasEntitlement("dynamic-codesigning"_s);
+    bool shouldDisableJITMemory = processHasEntitlement("dynamic-codesigning"_s) || processHasEntitlement("com.apple.developer.cs.allow-jit"_s);
 #else
     bool shouldDisableJITMemory = processHasEntitlement("com.apple.security.cs.allow-jit"_s) && !isKernOpenSource();
 #endif
@@ -450,7 +450,7 @@ static ALWAYS_INLINE JITReservation initializeJITPageReservation()
         {
             uint64_t pid = getCurrentProcessID();
             auto uuid = WTF::UUID::createVersion5(jscJITNamespace, std::span { bitwise_cast<const uint8_t*>(&pid), sizeof(pid) });
-            kdebug_trace(KDBG_CODE(DBG_DYLD, DBG_DYLD_UUID, DBG_DYLD_UUID_MAP_A), WTF::bswap64(uuid.high()), WTF::bswap64(uuid.low()), bitwise_cast<uintptr_t>(reservation.base), 0);
+            kdebug_trace(KDBG_CODE(DBG_DYLD, DBG_DYLD_UUID, DBG_DYLD_UUID_MAP_A), WTF::byteSwap64(uuid.high()), WTF::byteSwap64(uuid.low()), bitwise_cast<uintptr_t>(reservation.base), 0);
         }
 #endif
     }

@@ -27,7 +27,7 @@
 #include "KeyedEncoderGeneric.h"
 
 #include "SharedBuffer.h"
-#include <wtf/Algorithms.h>
+#include <wtf/StdLibExtras.h>
 #include <wtf/persistence/PersistentEncoder.h>
 
 namespace WebCore {
@@ -47,12 +47,12 @@ void KeyedEncoderGeneric::encodeString(const String& key)
     RELEASE_ASSERT(result);
 }
 
-void KeyedEncoderGeneric::encodeBytes(const String& key, const uint8_t* bytes, size_t size)
+void KeyedEncoderGeneric::encodeBytes(const String& key, std::span<const uint8_t> bytes)
 {
     m_encoder << Type::Bytes;
     encodeString(key);
-    m_encoder << size;
-    m_encoder.encodeFixedLengthData({ bytes, size });
+    m_encoder << bytes.size();
+    m_encoder.encodeFixedLengthData(bytes);
 }
 
 void KeyedEncoderGeneric::encodeBool(const String& key, bool value)
@@ -145,7 +145,7 @@ void KeyedEncoderGeneric::endArray()
 
 RefPtr<SharedBuffer> KeyedEncoderGeneric::finishEncoding()
 {
-    return SharedBuffer::create(m_encoder.buffer(), m_encoder.bufferSize());
+    return SharedBuffer::create(m_encoder.span());
 }
 
 } // namespace WebCore

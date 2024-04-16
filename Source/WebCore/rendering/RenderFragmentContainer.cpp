@@ -106,12 +106,12 @@ LayoutPoint RenderFragmentContainer::mapFragmentPointIntoFragmentedFlowCoordinat
     return isHorizontalWritingMode() ? pointInThread : pointInThread.transposedPoint();
 }
 
-VisiblePosition RenderFragmentContainer::positionForPoint(const LayoutPoint& point, const RenderFragmentContainer* fragment)
+VisiblePosition RenderFragmentContainer::positionForPoint(const LayoutPoint& point, HitTestSource source, const RenderFragmentContainer* fragment)
 {
     if (!isValid() || !m_fragmentedFlow->firstChild()) // checking for empty fragment blocks.
-        return RenderBlock::positionForPoint(point, fragment);
+        return RenderBlock::positionForPoint(point, source, fragment);
 
-    return m_fragmentedFlow->positionForPoint(mapFragmentPointIntoFragmentedFlowCoordinates(point), this);
+    return m_fragmentedFlow->positionForPoint(mapFragmentPointIntoFragmentedFlowCoordinates(point), source, this);
 }
 
 LayoutUnit RenderFragmentContainer::pageLogicalWidth() const
@@ -358,16 +358,16 @@ LayoutUnit RenderFragmentContainer::logicalBottomOfFragmentedFlowContentRect(con
     return fragmentedFlow()->isHorizontalWritingMode() ? rect.maxY() : rect.maxX();
 }
 
-void RenderFragmentContainer::insertedIntoTree(IsInternalMove isInternalMove)
+void RenderFragmentContainer::insertedIntoTree()
 {
     attachFragment();
     if (isValid())
-        RenderBlockFlow::insertedIntoTree(isInternalMove);
+        RenderBlockFlow::insertedIntoTree();
 }
 
-void RenderFragmentContainer::willBeRemovedFromTree(IsInternalMove isInternalMove)
+void RenderFragmentContainer::willBeRemovedFromTree()
 {
-    RenderBlockFlow::willBeRemovedFromTree(isInternalMove);
+    RenderBlockFlow::willBeRemovedFromTree();
 
     detachFragment();
 }

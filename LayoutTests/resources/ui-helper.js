@@ -908,9 +908,9 @@ window.UIHelper = class UIHelper {
         if (!this.isWebKit2() || this.isIOSFamily())
             return Promise.resolve();
 
-        if (internals.isUsingUISideCompositing() && (!scroller || scroller.nodeName != "SELECT")) {
-            var scrollingNodeID = internalFunctions.scrollingNodeIDForNode(scroller);
-            return new Promise(resolve => {
+            if (internals.isUsingUISideCompositing() && (!scroller || scroller.nodeName != "SELECT")) {
+                var scrollingNodeID = internalFunctions.scrollingNodeIDForNode(scroller);
+                return new Promise(resolve => {
                 testRunner.runUIScript(`(function() {
                     uiController.doAfterNextStablePresentationUpdate(function() {
                         uiController.uiScriptComplete(uiController.scrollbarStateForScrollingNodeID(${scrollingNodeID[0]}, ${scrollingNodeID[1]}, ${isVertical}));
@@ -2156,14 +2156,14 @@ window.UIHelper = class UIHelper {
         });
     }
 
-    static requestRenderedTextForSelector(selector)
+    static requestRenderedTextForFrontmostTarget(x, y)
     {
         if (!this.isWebKit2())
             return Promise.resolve();
 
         return new Promise(resolve => {
             testRunner.runUIScript(`(() => {
-                uiController.requestRenderedTextForSelector("${selector}", result => uiController.uiScriptComplete(result));
+                uiController.requestRenderedTextForFrontmostTarget(${x}, ${y}, result => uiController.uiScriptComplete(result));
             })()`, resolve);
         });
     }
@@ -2171,6 +2171,12 @@ window.UIHelper = class UIHelper {
     static adjustVisibilityForFrontmostTarget(x, y) {
         if (!this.isWebKit2())
             return Promise.resolve();
+
+        if (x instanceof HTMLElement) {
+            const point = this.midPointOfRect(x.getBoundingClientRect());
+            x = point.x;
+            y = point.y;
+        }
 
         return new Promise(resolve => {
             testRunner.runUIScript(`(() => {

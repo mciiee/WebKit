@@ -48,7 +48,8 @@ enum class SpeechRecognitionUpdateType : uint8_t;
 
 class SpeechRecognitionCaptureSourceImpl
     : public RealtimeMediaSource::Observer
-    , public RealtimeMediaSource::AudioSampleObserver {
+    , public RealtimeMediaSource::AudioSampleObserver
+    , public CanMakeCheckedPtr<SpeechRecognitionCaptureSourceImpl> {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     using DataCallback = Function<void(const WTF::MediaTime&, const PlatformAudioData&, const AudioStreamDescription&, size_t)>;
@@ -58,6 +59,17 @@ public:
     void mute();
 
 private:
+    // CheckedPtr interface
+    uint32_t ptrCount() const final { return CanMakeCheckedPtr::ptrCount(); }
+    void incrementPtrCount() const final { CanMakeCheckedPtr::incrementPtrCount(); }
+    void decrementPtrCount() const final { CanMakeCheckedPtr::decrementPtrCount(); }
+#if CHECKED_POINTER_DEBUG
+    void registerCheckedPtr(const void* pointer) const final { CanMakeCheckedPtr::registerCheckedPtr(pointer); };
+    void copyCheckedPtr(const void* source, const void* destination) const final { CanMakeCheckedPtr::copyCheckedPtr(source, destination); }
+    void moveCheckedPtr(const void* source, const void* destination) const final { CanMakeCheckedPtr::moveCheckedPtr(source, destination); }
+    void unregisterCheckedPtr(const void* pointer) const final { CanMakeCheckedPtr::unregisterCheckedPtr(pointer); }
+#endif // CHECKED_POINTER_DEBUG
+
     // RealtimeMediaSource::AudioSampleObserver
     void audioSamplesAvailable(const WTF::MediaTime&, const PlatformAudioData&, const AudioStreamDescription&, size_t) final;
 

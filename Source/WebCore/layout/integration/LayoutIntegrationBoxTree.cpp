@@ -199,7 +199,7 @@ UniqueRef<Layout::Box> BoxTree::createLayoutBox(RenderObject& renderer)
         auto canUseSimpleFontCodePath = textRenderer->canUseSimpleFontCodePath();
         auto canUseSimplifiedTextMeasuring = textRenderer->canUseSimplifiedTextMeasuring();
         if (!canUseSimplifiedTextMeasuring) {
-            canUseSimplifiedTextMeasuring = canUseSimpleFontCodePath && Layout::TextUtil::canUseSimplifiedTextMeasuring(text, style, firstLineStyle.get());
+            canUseSimplifiedTextMeasuring = canUseSimpleFontCodePath && Layout::TextUtil::canUseSimplifiedTextMeasuring(text, style.fontCascade(), style.collapseWhiteSpace(), firstLineStyle.get());
             textRenderer->setCanUseSimplifiedTextMeasuring(*canUseSimplifiedTextMeasuring);
         }
 
@@ -274,20 +274,23 @@ void BoxTree::insertChild(UniqueRef<Layout::Box> childBox, RenderObject& childRe
     parentBox.insertChild(WTFMove(childBox), beforeChildBox);
 }
 
-void BoxTree::updateStyle(const RenderBoxModelObject& renderer)
+void BoxTree::updateStyle(const RenderObject& renderer)
 {
-    auto& layoutBox = layoutBoxForRenderer(renderer);
-    auto& rendererStyle = renderer.style();
+    auto* layoutBox = const_cast<Layout::Box*>(renderer.layoutBox());
+    if (!layoutBox) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+    if (layoutBox->isInlineTextBox()) {
+        ASSERT(is<RenderText>(renderer));
+        layoutBox->updateStyle(RenderStyle::createAnonymousStyleWithDisplay(renderer.style(), DisplayType::Inline), firstLineStyleFor(renderer));
+        return;
+    }
 
     auto firstLineNewStyle = firstLineStyleFor(renderer);
-    auto newStyle = RenderStyle::clone(rendererStyle);
-    adjustStyleIfNeeded(renderer, newStyle, firstLineNewStyle.get());
-    layoutBox.updateStyle(WTFMove(newStyle), WTFMove(firstLineNewStyle));
-
-    for (auto* child = layoutBox.firstChild(); child; child = child->nextSibling()) {
-        if (child->isInlineTextBox())
-            child->updateStyle(RenderStyle::createAnonymousStyleWithDisplay(rendererStyle, DisplayType::Inline), firstLineStyleFor(renderer));
-    }
+    auto newStyle = RenderStyle::clone(renderer.style());
+    adjustStyleIfNeeded(downcast<RenderElement>(renderer), newStyle, firstLineNewStyle.get());
+    layoutBox->updateStyle(WTFMove(newStyle), WTFMove(firstLineNewStyle));
 }
 
 void BoxTree::updateContent(const RenderText& textRenderer)
@@ -302,7 +305,7 @@ void BoxTree::updateContent(const RenderText& textRenderer)
     auto contentCharacteristic = OptionSet<Layout::InlineTextBox::ContentCharacteristic> { };
     if (textRenderer.canUseSimpleFontCodePath())
         contentCharacteristic.add(Layout::InlineTextBox::ContentCharacteristic::CanUseSimpledFontCodepath);
-    if (textRenderer.canUseSimpleFontCodePath() && Layout::TextUtil::canUseSimplifiedTextMeasuring(text, style, &inlineTextBox.firstLineStyle()))
+    if (textRenderer.canUseSimpleFontCodePath() && Layout::TextUtil::canUseSimplifiedTextMeasuring(text, style.fontCascade(), style.collapseWhiteSpace(), &inlineTextBox.firstLineStyle()))
         contentCharacteristic.add(Layout::InlineTextBox::ContentCharacteristic::CanUseSimplifiedContentMeasuring);
     if (Layout::TextUtil::hasPositionDependentContentWidth(text))
         contentCharacteristic.add(Layout::InlineTextBox::ContentCharacteristic::HasPositionDependentContentWidth);
@@ -400,6 +403,21 @@ RenderObject& BoxTree::rendererForLayoutBox(const Layout::Box& box)
 const RenderObject& BoxTree::rendererForLayoutBox(const Layout::Box& box) const
 {
     return const_cast<BoxTree&>(*this).rendererForLayoutBox(box);
+}
+
+bool BoxTree::hasRendererForLayoutBox(const Layout::Box& box) const
+{
+    if (&box == &rootLayoutBox())
+        return true;
+
+    if (m_boxToRendererMap.isEmpty()) {
+        for (auto& renderer : m_renderers) {
+            if (renderer->layoutBox() == &box)
+                return true;
+        }
+        return false;
+    }
+    return m_boxToRendererMap.contains(&box);
 }
 
 Layout::InitialContainingBlock& BoxTree::initialContainingBlock()

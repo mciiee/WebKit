@@ -165,11 +165,9 @@ public:
     // Repaint only if our old bounds and new bounds are different. The caller may pass in newBounds and newOutlineBox if they are known.
     bool repaintAfterLayoutIfNeeded(const RenderLayerModelObject* repaintContainer, RequiresFullRepaint, const RepaintRects& oldRects, const RepaintRects& newRects);
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     void repaintClientsOfReferencedSVGResources() const;
     void repaintRendererOrClientsOfReferencedSVGResources() const;
     void repaintOldAndNewPositionsForSVGRenderer() const;
-#endif
 
     bool borderImageIsLoadedAndCanBeRendered() const;
     bool isVisibleIgnoringGeometry() const;
@@ -302,7 +300,10 @@ protected:
 
     bool layerCreationAllowedForSubtree() const;
 
-    enum StylePropagationType { PropagateToAllChildren, PropagateToBlockChildrenOnly };
+    enum class StylePropagationType {
+        AllChildren,
+        BlockChildrenOnly
+    };
     void propagateStyleToAnonymousChildren(StylePropagationType);
 
     bool repaintBeforeStyleChange(StyleDifference, const RenderStyle& oldStyle, const RenderStyle& newStyle);
@@ -310,8 +311,8 @@ protected:
     virtual void styleWillChange(StyleDifference, const RenderStyle& newStyle);
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
 
-    void insertedIntoTree(IsInternalMove) override;
-    void willBeRemovedFromTree(IsInternalMove) override;
+    void insertedIntoTree() override;
+    void willBeRemovedFromTree() override;
     void willBeDestroyed() override;
     void notifyFinished(CachedResource&, const NetworkLoadMetrics&) override;
 
@@ -364,7 +365,7 @@ private:
 
     StyleDifference adjustStyleDifference(StyleDifference, OptionSet<StyleDifferenceContextSensitiveProperty>) const;
 
-    bool canDestroyDecodedData() final { return !isVisibleInViewport(); }
+    bool canDestroyDecodedData() const final { return !isVisibleInViewport(); }
     VisibleInViewportState imageFrameAvailable(CachedImage&, ImageAnimatingState, const IntRect* changeRect) final;
     VisibleInViewportState imageVisibleInViewport(const Document&) const final;
     void didRemoveCachedImageClient(CachedImage&) final;
@@ -430,9 +431,8 @@ inline void RenderElement::setChildNeedsLayout(MarkingBehavior markParents)
         return;
     setNormalChildNeedsLayoutBit(true);
     if (markParents == MarkContainingBlockChain)
-        markContainingBlocksForLayout();
+        scheduleLayout(markContainingBlocksForLayout());
 }
-
 
 inline Element* RenderElement::generatingElement() const
 {

@@ -177,7 +177,7 @@ String capitalize(const String& string, UChar previousCharacter)
     for (unsigned i = 1; i < length + 1; i++)
         stringWithPrevious[i] = convertNoBreakSpaceToSpace(stringImpl[i - 1]);
 
-    auto* breakIterator = wordBreakIterator(StringView { stringWithPrevious.data(), length + 1 });
+    auto* breakIterator = WTF::wordBreakIterator(stringWithPrevious.span().first(length + 1));
     if (!breakIterator)
         return string;
 
@@ -370,6 +370,9 @@ void RenderText::styleDidChange(StyleDifference diff, const RenderStyle* oldStyl
     TextSecurity oldSecurity = oldStyle ? oldStyle->textSecurity() : TextSecurity::None;
     if (needsResetText || oldTransform != newStyle.textTransform() || oldSecurity != newStyle.textSecurity())
         RenderText::setText(originalText(), true);
+
+    if (diff >= StyleDifference::Repaint && layoutBox())
+        LayoutIntegration::LineLayout::updateStyle(*this);
 }
 
 void RenderText::removeAndDestroyTextBoxes()
@@ -655,9 +658,9 @@ Vector<FloatQuad> RenderText::absoluteQuadsForRange(unsigned start, unsigned end
     return quads;
 }
 
-Position RenderText::positionForPoint(const LayoutPoint& point)
+Position RenderText::positionForPoint(const LayoutPoint& point, HitTestSource source)
 {
-    return positionForPoint(point, nullptr).deepEquivalent();
+    return positionForPoint(point, source, nullptr).deepEquivalent();
 }
 
 enum ShouldAffinityBeDownstream { AlwaysDownstream, AlwaysUpstream, UpstreamIfPositionIsNotAtStart };
@@ -791,7 +794,7 @@ static VisiblePosition createVisiblePositionAfterAdjustingOffsetForBiDi(const In
 }
 
 
-VisiblePosition RenderText::positionForPoint(const LayoutPoint& point, const RenderFragmentContainer*)
+VisiblePosition RenderText::positionForPoint(const LayoutPoint& point, HitTestSource, const RenderFragmentContainer*)
 {
     auto firstRun = InlineIterator::firstTextBoxFor(*this);
 
@@ -1370,10 +1373,10 @@ void RenderText::computePreferredLogicalWidths(float leadWidth, SingleThreadWeak
     setPreferredLogicalWidthsDirty(false);
 }
 
-template<typename CharacterType> static inline bool containsOnlyCollapsibleWhitespace(const CharacterType* characters, unsigned length, const RenderStyle& style)
+template<typename CharacterType> static inline bool containsOnlyCollapsibleWhitespace(std::span<const CharacterType> characters, const RenderStyle& style)
 {
-    for (unsigned i = 0; i < length; ++i) {
-        if (!style.isCollapsibleWhiteSpace(characters[i]))
+    for (auto character : characters) {
+        if (!style.isCollapsibleWhiteSpace(character))
             return false;
     }
     return true;
@@ -1382,15 +1385,15 @@ template<typename CharacterType> static inline bool containsOnlyCollapsibleWhite
 bool RenderText::containsOnlyCollapsibleWhitespace() const
 {
     if (text().is8Bit())
-        return WebCore::containsOnlyCollapsibleWhitespace(text().characters8(), text().length(), style());
-    return WebCore::containsOnlyCollapsibleWhitespace(text().characters16(), text().length(), style());
+        return WebCore::containsOnlyCollapsibleWhitespace(text().span8(), style());
+    return WebCore::containsOnlyCollapsibleWhitespace(text().span16(), style());
 }
 
 // FIXME: merge this with isCSSSpace somehow
-template<typename CharacterType> static inline bool containsOnlyPossiblyCollapsibleWhitespace(const CharacterType* characters, unsigned length)
+template<typename CharacterType> static inline bool containsOnlyPossiblyCollapsibleWhitespace(std::span<const CharacterType> characters)
 {
-    for (unsigned i = 0; i < length; ++i) {
-        if (!(characters[i] == '\n' || characters[i] == ' ' || characters[i] == '\t'))
+    for (auto character : characters) {
+        if (!(character == '\n' || character == ' ' || character == '\t'))
             return false;
     }
     return true;
@@ -1402,8 +1405,8 @@ bool RenderText::containsOnlyCSSWhitespace(unsigned from, unsigned length) const
     ASSERT(length <= text().length());
     ASSERT(from + length <= text().length());
     if (text().is8Bit())
-        return containsOnlyPossiblyCollapsibleWhitespace(text().characters8() + from, length);
-    return containsOnlyPossiblyCollapsibleWhitespace(text().characters16() + from, length);
+        return containsOnlyPossiblyCollapsibleWhitespace(text().span8().subspan(from, length));
+    return containsOnlyPossiblyCollapsibleWhitespace(text().span16().subspan(from, length));
 }
 
 Vector<std::pair<unsigned, unsigned>> RenderText::draggedContentRangesBetweenOffsets(unsigned startOffset, unsigned endOffset) const
@@ -1689,11 +1692,11 @@ static void invalidateLineLayoutPathOnContentChangeIfNeeded(const RenderText& re
         return;
 
     if (LayoutIntegration::LineLayout::shouldInvalidateLineLayoutPathAfterContentChange(*container, renderer, *modernLineLayout)) {
-        container->invalidateLineLayoutPath();
+        container->invalidateLineLayoutPath(RenderBlockFlow::InvalidationReason::ContentChange);
         return;
     }
     if (!modernLineLayout->updateTextContent(renderer, offset, delta))
-        container->invalidateLineLayoutPath();
+        container->invalidateLineLayoutPath(RenderBlockFlow::InvalidationReason::ContentChange);
 }
 
 void RenderText::setTextInternal(const String& text, bool force)
@@ -1724,15 +1727,14 @@ void RenderText::setText(const String& newContent, bool force)
     invalidateLineLayoutPathOnContentChangeIfNeeded(*this, 0, text().length());
 }
 
-void RenderText::setTextWithOffset(const String& newText, unsigned offset, unsigned length, bool force)
+void RenderText::setTextWithOffset(const String& newText, unsigned offset, unsigned, bool force)
 {
     if (!force && text() == newText)
         return;
 
     int delta = newText.length() - text().length();
-    unsigned end = offset + length;
 
-    m_linesDirty = m_lineBoxes.dirtyRange(*this, offset, end, delta);
+    m_linesDirty = m_lineBoxes.dirtyForTextChange(*this);
 
     setTextInternal(newText, force || m_linesDirty);
     invalidateLineLayoutPathOnContentChangeIfNeeded(*this, offset, delta);
@@ -2009,13 +2011,13 @@ int RenderText::previousOffset(int current) const
     if (m_containsOnlyASCII || text().is8Bit())
         return current - 1;
 
-    CachedTextBreakIterator iterator(text(), nullptr, 0, TextBreakIterator::CaretMode { }, nullAtom());
+    CachedTextBreakIterator iterator(text(), { }, TextBreakIterator::CaretMode { }, nullAtom());
     return iterator.preceding(current).value_or(current - 1);
 }
 
 int RenderText::previousOffsetForBackwardDeletion(int current) const
 {
-    CachedTextBreakIterator iterator(text(), nullptr, 0, TextBreakIterator::DeleteMode { }, nullAtom());
+    CachedTextBreakIterator iterator(text(), { }, TextBreakIterator::DeleteMode { }, nullAtom());
     return iterator.preceding(current).value_or(0);
 }
 
@@ -2024,7 +2026,7 @@ int RenderText::nextOffset(int current) const
     if (m_containsOnlyASCII || text().is8Bit())
         return current + 1;
 
-    CachedTextBreakIterator iterator(text(), nullptr, 0, TextBreakIterator::CaretMode { }, nullAtom());
+    CachedTextBreakIterator iterator(text(), { }, TextBreakIterator::CaretMode { }, nullAtom());
     return iterator.following(current).value_or(current + 1);
 }
 
@@ -2051,9 +2053,7 @@ StringView RenderText::stringView(unsigned start, std::optional<unsigned> stop) 
     ASSERT(start <= length());
     ASSERT(destination <= length());
     ASSERT(start <= destination);
-    if (text().is8Bit())
-        return { text().characters8() + start, destination - start };
-    return { text().characters16() + start, destination - start };
+    return StringView { text() }.substring(start, destination - start);
 }
 
 RenderInline* RenderText::inlineWrapperForDisplayContents()

@@ -155,7 +155,7 @@ MediaPlayerPrivateGStreamer::MediaPlayerPrivateGStreamer(MediaPlayer* player)
     , m_drawTimer(RunLoop::main(), this, &MediaPlayerPrivateGStreamer::repaint)
     , m_pausedTimerHandler(RunLoop::main(), this, &MediaPlayerPrivateGStreamer::pausedTimerFired)
 #if USE(TEXTURE_MAPPER) && !USE(NICOSIA)
-    , m_platformLayerProxy(adoptRef(new TextureMapperPlatformLayerProxyGL))
+    , m_platformLayerProxy(adoptRef(new TextureMapperPlatformLayerProxyGL(TextureMapperPlatformLayerProxy::ContentType::Video)))
 #endif
 #if !RELEASE_LOG_DISABLED
     , m_logger(player->mediaPlayerLogger())
@@ -180,13 +180,13 @@ MediaPlayerPrivateGStreamer::MediaPlayerPrivateGStreamer(MediaPlayer* player)
     m_nicosiaLayer = Nicosia::ContentLayer::create(*this,
         [&]() -> Ref<TextureMapperPlatformLayerProxy> {
             if (isHolePunchRenderingEnabled())
-                return adoptRef(*new TextureMapperPlatformLayerProxyGL(true));
+                return adoptRef(*new TextureMapperPlatformLayerProxyGL(TextureMapperPlatformLayerProxy::ContentType::HolePunch));
 
 #if USE(TEXTURE_MAPPER_DMABUF)
             if (webKitDMABufVideoSinkIsEnabled() && webKitDMABufVideoSinkProbePlatform())
-                return adoptRef(*new TextureMapperPlatformLayerProxyDMABuf);
+                return adoptRef(*new TextureMapperPlatformLayerProxyDMABuf(TextureMapperPlatformLayerProxy::ContentType::Video));
 #endif
-            return adoptRef(*new TextureMapperPlatformLayerProxyGL(false));
+            return adoptRef(*new TextureMapperPlatformLayerProxyGL(TextureMapperPlatformLayerProxy::ContentType::Video));
         }());
 #endif
 
@@ -331,8 +331,8 @@ void MediaPlayerPrivateGStreamer::load(const String& urlString)
         m_fillTimer.stop();
 
     ASSERT(m_pipeline);
-    setVisibleInViewport(player->isVisibleInViewport());
     setPlaybinURL(url);
+    setVisibleInViewport(player->isVisibleInViewport());
 
     GST_DEBUG_OBJECT(pipeline(), "preload: %s", convertEnumerationToString(m_preload).utf8().data());
     if (m_preload == MediaPlayer::Preload::None && !isMediaSource()) {
@@ -393,16 +393,16 @@ void MediaPlayerPrivateGStreamer::prepareToPlay()
     }
 }
 
-bool MediaPlayerPrivateGStreamer::isPipelineSeeking(GstState current, GstState pending, GstStateChangeReturn change) const
+bool MediaPlayerPrivateGStreamer::isPipelineWaitingPreroll(GstState current, GstState pending, GstStateChangeReturn change) const
 {
-    return change == GST_STATE_CHANGE_ASYNC && current == GST_STATE_PAUSED && pending == GST_STATE_PAUSED;
+    return change == GST_STATE_CHANGE_ASYNC && current == GST_STATE_PAUSED && pending >= GST_STATE_PAUSED;
 }
 
-bool MediaPlayerPrivateGStreamer::isPipelineSeeking() const
+bool MediaPlayerPrivateGStreamer::isPipelineWaitingPreroll() const
 {
     GstState current, pending;
     GstStateChangeReturn change = gst_element_get_state(m_pipeline.get(), &current, &pending, 0);
-    return isPipelineSeeking(current, pending, change);
+    return isPipelineWaitingPreroll(current, pending, change);
 }
 
 void MediaPlayerPrivateGStreamer::play()
@@ -419,8 +419,8 @@ void MediaPlayerPrivateGStreamer::play()
         return;
     }
 
-    if (isPipelineSeeking()) {
-        GST_DEBUG_OBJECT(pipeline(), "pipeline is seeking, let's delay moving the pipeline to playing right now");
+    if (isPipelineWaitingPreroll()) {
+        GST_DEBUG_OBJECT(pipeline(), "pipeline is waiting preroll (after seek or flush), let's delay moving the pipeline to playing right now");
         return;
     }
 
@@ -487,7 +487,7 @@ bool MediaPlayerPrivateGStreamer::paused() const
         return isPipelinePaused;
 
 #if !defined(GST_DISABLE_GST_DEBUG) || !defined(NDEBUG)
-    if (!isPipelineSeeking(state, pending, stateChange) && isPipelinePaused != !m_isPipelinePlaying
+    if (!isPipelineWaitingPreroll(state, pending, stateChange) && isPipelinePaused != !m_isPipelinePlaying
         && (stateChange == GST_STATE_CHANGE_SUCCESS || stateChange == GST_STATE_CHANGE_NO_PREROLL)) {
         GST_WARNING_OBJECT(pipeline(), "states are not synchronized, player paused %s, pipeline paused %s",
             boolForPrinting(!m_isPipelinePlaying), boolForPrinting(isPipelinePaused));
@@ -994,8 +994,8 @@ MediaPlayerPrivateGStreamer::ChangePipelineStateResult MediaPlayerPrivateGStream
 
     GstState currentState, pending;
     GstStateChangeReturn change = gst_element_get_state(m_pipeline.get(), &currentState, &pending, 0);
-    if (isPipelineSeeking(currentState, pending, change)) {
-        GST_DEBUG_OBJECT(pipeline(), "rejected state change during seek");
+    if (isPipelineWaitingPreroll(currentState, pending, change)) {
+        GST_DEBUG_OBJECT(pipeline(), "rejected state change during preroll");
         return ChangePipelineStateResult::Rejected;
     }
 
@@ -1428,7 +1428,8 @@ MediaTime MediaPlayerPrivateGStreamer::playbackPosition() const
         return m_cachedPosition;
     }
 
-    GstClockTime gstreamerPosition = gstreamerPositionFromSinks();
+    // We can't trust sinks position when pipeline is flushed (e.g. after MSE samples removal).
+    GstClockTime gstreamerPosition = isPipelineWaitingPreroll() ? GST_CLOCK_TIME_NONE : gstreamerPositionFromSinks();
     GST_TRACE_OBJECT(pipeline(), "Position %" GST_TIME_FORMAT ", canFallBackToLastFinishedSeekPosition: %s", GST_TIME_ARGS(gstreamerPosition), boolForPrinting(m_canFallBackToLastFinishedSeekPosition));
 
     // Cached position is marked as non valid here but we might fail to get a new one so initializing to this as "educated guess".
@@ -3437,6 +3438,10 @@ void MediaPlayerPrivateGStreamer::pushDMABufToCompositor()
         }
     }
 
+    auto textureMapperFlags = m_textureMapperFlags;
+    if (GST_VIDEO_INFO_HAS_ALPHA(&videoInfo))
+        textureMapperFlags.add({ TextureMapperFlags::ShouldBlend, TextureMapperFlags::ShouldPremultiply });
+
     ++m_sampleCount;
 
     auto& proxy = m_nicosiaLayer->proxy();
@@ -3522,7 +3527,7 @@ void MediaPlayerPrivateGStreamer::pushDMABufToCompositor()
 #endif
                 }
                 return WTFMove(object);
-            }, m_textureMapperFlags);
+            }, textureMapperFlags);
 
         auto* quarkData = static_cast<DMABufMemoryQuarkData*>(gst_mini_object_get_qdata(GST_MINI_OBJECT_CAST(memory.get()), dmabuf_memory_quark()));
         if (quarkData)
@@ -3615,7 +3620,7 @@ void MediaPlayerPrivateGStreamer::pushDMABufToCompositor()
             auto object = swapchainBuffer->createDMABufObject(initialObject.handle);
             object.colorSpace = colorSpaceForColorimetry(&GST_VIDEO_INFO_COLORIMETRY(&videoInfo));
             return object;
-        }, m_textureMapperFlags);
+        }, textureMapperFlags);
 }
 #endif // USE(TEXTURE_MAPPER_DMABUF)
 
@@ -3955,10 +3960,18 @@ void MediaPlayerPrivateGStreamer::setVisibleInViewport(bool isVisible)
     if (!isVisible) {
         GstState currentState;
         gst_element_get_state(m_pipeline.get(), &currentState, nullptr, 0);
-        if (currentState > GST_STATE_NULL)
+        // WebKitMediaSrc cannot properly handle PAUSED -> READY -> PAUSED currently, so we have to avoid transitioning
+        // back to READY when the player becomes visible.
+        GstState minimumState = isMediaSource() ? GST_STATE_PAUSED : GST_STATE_READY;
+        if (currentState >= minimumState)
             m_invisiblePlayerState = currentState;
         m_isVisibleInViewport = false;
-        gst_element_set_state(m_pipeline.get(), GST_STATE_PAUSED);
+        // Avoid setting the pipeline to PAUSED unless the playbin URL has already been set,
+        // otherwise it will fail, and may leave the pipeline stuck on READY with PAUSE pending.
+        if (!m_url.isValid())
+            return;
+        [[maybe_unused]] auto setStateResult = gst_element_set_state(m_pipeline.get(), GST_STATE_PAUSED);
+        ASSERT(setStateResult != GST_STATE_CHANGE_FAILURE);
     } else {
         m_isVisibleInViewport = true;
         if (m_invisiblePlayerState != GST_STATE_VOID_PENDING)

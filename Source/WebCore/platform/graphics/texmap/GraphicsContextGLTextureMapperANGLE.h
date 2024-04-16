@@ -38,6 +38,10 @@ class GCGLANGLELayer;
 
 namespace WebCore {
 
+#if PLATFORM(GTK) || PLATFORM(WPE)
+class GLFence;
+#endif
+
 class TextureMapperGCGLPlatformLayer;
 
 class WEBCORE_EXPORT GraphicsContextGLTextureMapperANGLE : public GLContextWrapper, public GraphicsContextGLANGLE {
@@ -58,6 +62,9 @@ public:
     void setContextVisibility(bool) final;
     bool reshapeDrawingBuffer() final;
     void prepareForDisplay() final;
+    bool addFoveation(IntSize, IntSize, IntSize, std::span<const GCGLfloat>, std::span<const GCGLfloat>, std::span<const GCGLfloat>) final;
+    void enableFoveation(GCGLuint) final;
+    void disableFoveation() final;
 
 private:
     GraphicsContextGLTextureMapperANGLE(WebCore::GraphicsContextGLAttributes&&);
@@ -79,6 +86,10 @@ private:
     RefPtr<GraphicsLayerContentsDisplayDelegate> m_layerContentsDisplayDelegate;
 
     GCGLuint m_compositorTexture { 0 };
+
+#if PLATFORM(GTK) || PLATFORM(WPE)
+    std::unique_ptr<GLFence> m_frameFence;
+#endif
 
 #if USE(NICOSIA)
     GCGLuint m_textureID { 0 };

@@ -4,7 +4,7 @@
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
  *           (C) 2007 David Smith (catfish.man@gmail.com)
- * Copyright (C) 2004-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2024 Apple Inc. All rights reserved.
  *           (C) 2007 Eric Seidel (eric@webkit.org)
  *
  * This library is free software; you can redistribute it and/or
@@ -65,6 +65,7 @@
 #include "FullscreenManager.h"
 #include "FullscreenOptions.h"
 #include "GetAnimationsOptions.h"
+#include "GetHTMLOptions.h"
 #include "HTMLBodyElement.h"
 #include "HTMLCanvasElement.h"
 #include "HTMLDialogElement.h"
@@ -145,6 +146,7 @@
 #include "TextIterator.h"
 #include "TouchAction.h"
 #include "TypedElementDescendantIteratorInlines.h"
+#include "VisibilityAdjustment.h"
 #include "VoidCallback.h"
 #include "WebAnimation.h"
 #include "WebAnimationTypes.h"
@@ -262,7 +264,11 @@ Element::~Element()
     ASSERT(!beforePseudoElement());
     ASSERT(!afterPseudoElement());
 
-    elementIdentifiersMap().remove(*this);
+    if (UNLIKELY(hasElementStateFlag(ElementStateFlag::HasElementIdentifier)))
+        elementIdentifiersMap().remove(*this);
+    else
+        ASSERT(!elementIdentifiersMap().contains(*this));
+
     ASSERT(!is<HTMLImageElement>(*this) || !intersectionObserverDataIfExists());
     disconnectFromIntersectionObservers();
 
@@ -574,7 +580,6 @@ Ref<Node> Element::cloneNodeInternal(Document& targetDocument, CloningOperation 
 {
     switch (type) {
     case CloningOperation::OnlySelf:
-        return cloneElementWithoutChildren(targetDocument);
     case CloningOperation::SelfWithTemplateContent: {
         Ref clone = cloneElementWithoutChildren(targetDocument);
         ScriptDisallowedScope::EventAllowedScope eventAllowedScope { clone };
@@ -595,7 +600,7 @@ void Element::cloneShadowTreeIfPossible(Element& newHost)
 
     Ref clonedShadowRoot = [&] {
         Ref clone = oldShadowRoot->cloneNodeInternal(newHost.document(), Node::CloningOperation::SelfWithTemplateContent);
-        return checkedDowncast<ShadowRoot>(WTFMove(clone));
+        return downcast<ShadowRoot>(WTFMove(clone));
     }();
     newHost.addShadowRoot(clonedShadowRoot.copyRef());
     oldShadowRoot->cloneChildNodes(clonedShadowRoot);
@@ -1664,10 +1669,8 @@ inline bool shouldObtainBoundsFromBoxModel(const Element* element)
     if (is<RenderBoxModelObject>(element->renderer()))
         return true;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (is<RenderSVGModelObject>(element->renderer()))
         return true;
-#endif
 
     return false;
 }
@@ -1844,7 +1847,7 @@ static std::optional<std::pair<CheckedRef<RenderObject>, LayoutRect>> listBoxEle
 
 Ref<DOMRectList> Element::getClientRects()
 {
-    document().updateLayoutIgnorePendingStylesheets({ LayoutOptions::ContentVisibilityForceLayout }, this);
+    protectedDocument()->updateLayoutIgnorePendingStylesheets({ LayoutOptions::ContentVisibilityForceLayout }, this);
 
     CheckedPtr<RenderObject> renderer = this->renderer();
 
@@ -1890,7 +1893,33 @@ std::optional<std::pair<CheckedPtr<RenderObject>, FloatRect>> Element::boundingA
 FloatRect Element::boundingClientRect()
 {
     Ref document = this->document();
-    document->updateLayoutIgnorePendingStylesheets({ LayoutOptions::ContentVisibilityForceLayout }, this);
+    auto needsLayout = [&] {
+        if (!document->haveStylesheetsLoaded())
+            return true;
+
+        if (RefPtr owner = document->ownerElement(); owner && owner->protectedDocument()->needsStyleRecalc())
+            return true;
+
+        document->updateRelevancyOfContentVisibilityElements();
+        document->updateStyleIfNeeded();
+        // FIXME: Expand this optimization to other elements.
+        if (!renderer() || !renderer()->isBody() || !renderer()->containingBlock() || !renderer()->containingBlock()->isDocumentElementRenderer())
+            return true;
+        auto& bodyRenderer = *renderer();
+        if (bodyRenderer.selfNeedsLayout() || bodyRenderer.containingBlock()->selfNeedsLayout() || (document->renderView() && document->renderView()->selfNeedsLayout()))
+            return true;
+        auto& bodyStyle = bodyRenderer.style();
+        if (!bodyStyle.logicalWidth().isFixed() && !bodyStyle.logicalWidth().isPercent())
+            return true;
+        if (!bodyStyle.logicalHeight().isFixed() && !bodyStyle.logicalHeight().isPercent())
+            return true;
+        // FIXME: Add support for scroll position.
+        return bodyStyle.hasViewportConstrainedPosition();
+    };
+
+    if (needsLayout())
+        document->updateLayoutIgnorePendingStylesheets({ LayoutOptions::ContentVisibilityForceLayout }, this);
+
     auto pair = boundingAbsoluteRectWithoutLayout();
     if (!pair)
         return { };
@@ -2239,15 +2268,16 @@ void Element::setElementAttribute(const QualifiedName& attributeName, Element* e
         cache->updateRelations(*this, attributeName);
 }
 
-std::optional<Vector<RefPtr<Element>>> Element::getElementsArrayAttribute(const QualifiedName& attributeName) const
+std::optional<Vector<Ref<Element>>> Element::getElementsArrayAttribute(const QualifiedName& attributeName) const
 {
     ASSERT(isElementsArrayReflectionAttribute(attributeName));
 
     if (auto* map = explicitlySetAttrElementsMapIfExists()) {
         if (auto it = map->find(attributeName); it != map->end()) {
-            return compactMap(it->value, [&](auto& element) -> std::optional<RefPtr<Element>> {
+            return compactMap(it->value, [&](auto& weakElement) -> std::optional<Ref<Element>> {
+                RefPtr element = weakElement.get();
                 if (element && isDescendantOrShadowDescendantOf(element->rootNode()))
-                    return element.get();
+                    return element.releaseNonNull();
                 return std::nullopt;
             });
         }
@@ -2261,15 +2291,15 @@ std::optional<Vector<RefPtr<Element>>> Element::getElementsArrayAttribute(const 
         return std::nullopt;
 
     SpaceSplitString ids(getAttribute(attr), SpaceSplitString::ShouldFoldCase::No);
-    Vector<RefPtr<Element>> elements;
+    Vector<Ref<Element>> elements;
     for (unsigned i = 0; i < ids.size(); ++i) {
         if (RefPtr element = treeScope().getElementById(ids[i]))
-            elements.append(WTFMove(element));
+            elements.append(element.releaseNonNull());
     }
     return elements;
 }
 
-void Element::setElementsArrayAttribute(const QualifiedName& attributeName, std::optional<Vector<RefPtr<Element>>>&& elements)
+void Element::setElementsArrayAttribute(const QualifiedName& attributeName, std::optional<Vector<Ref<Element>>>&& elements)
 {
     ASSERT(isElementsArrayReflectionAttribute(attributeName));
 
@@ -2454,7 +2484,7 @@ void Element::invalidateForQueryContainerSizeChange()
 {
     // FIXME: Ideally we would just recompute things that are actually affected by containers queries within the subtree.
     Node::invalidateStyle(Style::Validity::SubtreeInvalid);
-    setStateFlag(StateFlag::NeedsUpdateQueryContainerDependentStyle);
+    setElementStateFlag(ElementStateFlag::NeedsUpdateQueryContainerDependentStyle);
 }
 
 void Element::invalidateForResumingQueryContainerResolution()
@@ -2464,12 +2494,12 @@ void Element::invalidateForResumingQueryContainerResolution()
 
 bool Element::needsUpdateQueryContainerDependentStyle() const
 {
-    return hasStateFlag(StateFlag::NeedsUpdateQueryContainerDependentStyle);
+    return hasElementStateFlag(ElementStateFlag::NeedsUpdateQueryContainerDependentStyle);
 }
 
 void Element::clearNeedsUpdateQueryContainerDependentStyle()
 {
-    clearStateFlag(StateFlag::NeedsUpdateQueryContainerDependentStyle);
+    clearElementStateFlag(ElementStateFlag::NeedsUpdateQueryContainerDependentStyle);
 }
 
 void Element::invalidateEventListenerRegions()
@@ -2962,16 +2992,22 @@ ExceptionOr<ShadowRoot&> Element::attachShadow(const ShadowRootInit& init)
     Ref shadow = ShadowRoot::create(document(), init.mode, init.slotAssignment,
         init.delegatesFocus ? ShadowRoot::DelegatesFocus::Yes : ShadowRoot::DelegatesFocus::No,
         init.clonable ? ShadowRoot::Clonable::Yes : ShadowRoot::Clonable::No,
+        init.serializable ? ShadowRoot::Serializable::Yes : ShadowRoot::Serializable::No,
         isPrecustomizedOrDefinedCustomElement() ? ShadowRoot::AvailableToElementInternals::Yes : ShadowRoot::AvailableToElementInternals::No);
     addShadowRoot(shadow.copyRef());
     return shadow.get();
 }
 
-ExceptionOr<ShadowRoot&> Element::attachDeclarativeShadow(ShadowRootMode mode, bool delegatesFocus, bool clonable)
+ExceptionOr<ShadowRoot&> Element::attachDeclarativeShadow(ShadowRootMode mode, ShadowRootDelegatesFocus delegatesFocus, ShadowRootClonable clonable, ShadowRootSerializable serializable)
 {
     if (this->shadowRoot())
         return Exception { ExceptionCode::NotSupportedError };
-    auto exceptionOrShadowRoot = attachShadow({ mode, delegatesFocus, clonable });
+    auto exceptionOrShadowRoot = attachShadow({
+        mode,
+        delegatesFocus == ShadowRootDelegatesFocus::Yes,
+        clonable == ShadowRootClonable::Yes,
+        serializable == ShadowRootSerializable::Yes
+    });
     if (exceptionOrShadowRoot.hasException())
         return exceptionOrShadowRoot.releaseException();
     Ref shadowRoot = exceptionOrShadowRoot.releaseReturnValue();
@@ -3021,7 +3057,7 @@ ShadowRoot& Element::createUserAgentShadowRoot()
 
 inline void Node::setCustomElementState(CustomElementState state)
 {
-    Style::PseudoClassChangeInvalidation styleInvalidation(checkedDowncast<Element>(*this),
+    Style::PseudoClassChangeInvalidation styleInvalidation(downcast<Element>(*this),
         CSSSelector::PseudoClass::Defined,
         state == CustomElementState::Custom || state == CustomElementState::Uncustomized
     );
@@ -3110,7 +3146,7 @@ CheckedRef<CustomElementDefaultARIA> Element::checkedCustomElementDefaultARIA()
     return customElementDefaultARIA();
 }
 
-CustomElementDefaultARIA* Element::customElementDefaultARIAIfExists()
+CustomElementDefaultARIA* Element::customElementDefaultARIAIfExists() const
 {
     return isPrecustomizedOrDefinedCustomElement() && hasRareData() ? elementRareData()->customElementDefaultARIA() : nullptr;
 }
@@ -3791,6 +3827,11 @@ ExceptionOr<void> Element::setHTMLUnsafe(const String& html)
     return replaceChildrenWithMarkup(html, { ParserContentPolicy::AllowDeclarativeShadowRoots, ParserContentPolicy::AlwaysParseAsHTML });
 }
 
+String Element::getHTML(GetHTMLOptions&& options) const
+{
+    return serializeFragment(*this, SerializedNodes::SubtreesOfChildren, nullptr, ResolveURLs::NoExcludingURLsForPrivacy, SerializationSyntax::HTML, { }, { }, options.serializableShadowRoots ? SerializeShadowRoots::Serializable : SerializeShadowRoots::Explicit, WTFMove(options.shadowRoots));
+}
+
 ExceptionOr<void> Element::mergeWithNextTextNode(Text& node)
 {
     RefPtr textNext = dynamicDowncast<Text>(node.nextSibling());
@@ -4466,9 +4507,9 @@ void Element::setFullscreenFlag(bool flag)
 {
     Style::PseudoClassChangeInvalidation styleInvalidation(*this, { { CSSSelector::PseudoClass::Fullscreen, flag }, { CSSSelector::PseudoClass::Modal, flag } });
     if (flag)
-        setStateFlag(StateFlag::IsFullscreen);
+        setElementStateFlag(ElementStateFlag::IsFullscreen);
     else
-        clearStateFlag(StateFlag::IsFullscreen);
+        clearElementStateFlag(ElementStateFlag::IsFullscreen);
 }
 
 #endif
@@ -5465,7 +5506,10 @@ Vector<RefPtr<WebAnimation>> Element::getAnimations(std::optional<GetAnimationsO
 
 ElementIdentifier Element::identifier() const
 {
-    return elementIdentifiersMap().ensure(const_cast<Element&>(*this), [] { return ElementIdentifier::generate(); }).iterator->value;
+    return elementIdentifiersMap().ensure(const_cast<Element&>(*this), [&] {
+        setElementStateFlag(ElementStateFlag::HasElementIdentifier);
+        return ElementIdentifier::generate();
+    }).iterator->value;
 }
 
 Element* Element::fromIdentifier(ElementIdentifier identifier)
@@ -5491,7 +5535,7 @@ void Element::setAttributeStyleMap(Ref<StylePropertyMap>&& map)
 
 void Element::ensureFormAssociatedCustomElement()
 {
-    auto& customElement = checkedDowncast<HTMLMaybeFormAssociatedCustomElement>(*this);
+    auto& customElement = downcast<HTMLMaybeFormAssociatedCustomElement>(*this);
     auto& data = ensureElementRareData();
     if (!data.formAssociatedCustomElement())
         data.setFormAssociatedCustomElement(makeUniqueWithoutRefCountedCheck<FormAssociatedCustomElement>(customElement));
@@ -5628,14 +5672,16 @@ CustomStateSet& Element::ensureCustomStateSet()
     return *rareData.customStateSet();
 }
 
-bool Element::isVisibilityAdjustmentRoot() const
+OptionSet<VisibilityAdjustment> Element::visibilityAdjustment() const
 {
-    return hasRareData() && elementRareData()->isVisibilityAdjustmentRoot();
+    if (!hasRareData())
+        return { };
+    return elementRareData()->visibilityAdjustment();
 }
 
-void Element::setIsVisibilityAdjustmentRoot()
+void Element::setVisibilityAdjustment(OptionSet<VisibilityAdjustment> adjustment)
 {
-    ensureElementRareData().setIsVisibilityAdjustmentRoot();
+    ensureElementRareData().setVisibilityAdjustment(adjustment);
 }
 
 } // namespace WebCore

@@ -264,7 +264,7 @@ void NetworkProcess::didClose(IPC::Connection&)
 
     forEachNetworkSession([&](auto& session) {
         platformFlushCookies(session.sessionID(), [callbackAggregator] { });
-        session.storageManager().syncLocalStorage([callbackAggregator] { });
+        session.protectedStorageManager()->syncLocalStorage([callbackAggregator] { });
     });
 
 #if PLATFORM(COCOA)
@@ -340,11 +340,8 @@ void NetworkProcess::initializeNetworkProcess(NetworkProcessCreationParameters&&
     m_builtInNotificationsEnabled = parameters.builtInNotificationsEnabled;
 #endif
 
-    for (auto [processIdentifier, domain] : parameters.allowedFirstPartiesForCookies) {
-        if (RefPtr connection = webProcessConnection(processIdentifier))
-            connection->addAllowedFirstPartyForCookies(domain);
+    for (auto [processIdentifier, domain] : parameters.allowedFirstPartiesForCookies)
         addAllowedFirstPartyForCookies(processIdentifier, WTFMove(domain), LoadedWebArchive::No, [] { });
-    }
 
     for (auto& supplement : m_supplements.values())
         supplement->initialize(parameters);
@@ -408,7 +405,7 @@ void NetworkProcess::createNetworkConnectionToWebProcess(ProcessIdentifier ident
 #endif
 
     if (auto* session = networkSession(sessionID))
-        session->storageManager().startReceivingMessageFromConnection(Ref { connection->connection() });
+        session->protectedStorageManager()->startReceivingMessageFromConnection(Ref { connection->connection() });
 }
 
 void NetworkProcess::addAllowedFirstPartyForCookies(WebCore::ProcessIdentifier processIdentifier, WebCore::RegistrableDomain&& firstPartyForCookies, LoadedWebArchive loadedWebArchive, CompletionHandler<void()>&& completionHandler)
@@ -437,14 +434,23 @@ void NetworkProcess::webProcessWillLoadWebArchive(WebCore::ProcessIdentifier pro
 
 bool NetworkProcess::allowsFirstPartyForCookies(WebCore::ProcessIdentifier processIdentifier, const URL& firstParty)
 {
-    return AuxiliaryProcess::allowsFirstPartyForCookies(firstParty, [&] {
-        RegistrableDomain firstPartyDomain(firstParty);
-        return allowsFirstPartyForCookies(processIdentifier, firstPartyDomain);
-    });
+    // FIXME: This should probably not be necessary. If about:blank is the first party for cookies,
+    // we should set it to be the inherited origin then remove this exception.
+    if (firstParty.isAboutBlank())
+        return true;
+
+    if (firstParty.isNull())
+        return true; // FIXME: This shouldn't be allowed.
+
+    return allowsFirstPartyForCookies(processIdentifier, RegistrableDomain { firstParty });
 }
 
 bool NetworkProcess::allowsFirstPartyForCookies(WebCore::ProcessIdentifier processIdentifier, const RegistrableDomain& firstPartyDomain)
 {
+    // FIXME: This shouldn't be needed but it is hit sometimes at least with PDFs.
+    if (firstPartyDomain.isEmpty())
+        return true;
+
     if (!decltype(m_allowedFirstPartiesForCookies)::isValidKey(processIdentifier)) {
         ASSERT_NOT_REACHED();
         return false;
@@ -460,7 +466,14 @@ bool NetworkProcess::allowsFirstPartyForCookies(WebCore::ProcessIdentifier proce
         return true;
 
     auto& set = iterator->value.second;
-    return AuxiliaryProcess::allowsFirstPartyForCookies(firstPartyDomain, set);
+    if (!std::remove_reference_t<decltype(set)>::isValidValue(firstPartyDomain)) {
+        ASSERT_NOT_REACHED();
+        return false;
+    }
+
+    auto result = set.contains(firstPartyDomain);
+    ASSERT(result);
+    return result;
 }
 
 void NetworkProcess::addStorageSession(PAL::SessionID sessionID, const WebsiteDataStoreParameters& parameters)
@@ -528,7 +541,7 @@ void NetworkProcess::addWebsiteDataStore(WebsiteDataStoreParameters&& parameters
     }).iterator->value;
 
     if (m_isSuspended)
-        session->storageManager().suspend([] { });
+        session->protectedStorageManager()->suspend([] { });
 }
 
 void NetworkProcess::forEachNetworkSession(const Function<void(NetworkSession&)>& functor)
@@ -1120,7 +1133,7 @@ void NetworkProcess::hasLocalStorage(PAL::SessionID sessionID, const Registrable
         return completionHandler(false);
 
     auto types = OptionSet<WebsiteDataType> { WebsiteDataType::LocalStorage };
-    session->storageManager().fetchData(types, NetworkStorageManager::ShouldComputeSize::No, [domain, completionHandler = WTFMove(completionHandler)](auto entries) mutable {
+    session->protectedStorageManager()->fetchData(types, NetworkStorageManager::ShouldComputeSize::No, [domain, completionHandler = WTFMove(completionHandler)](auto entries) mutable {
         completionHandler(WTF::anyOf(entries, [&domain](auto& entry) {
             return domain.matches(entry.origin);
         }));
@@ -1625,7 +1638,7 @@ void NetworkProcess::fetchWebsiteData(PAL::SessionID sessionID, OptionSet<Websit
 
     if (NetworkStorageManager::canHandleTypes(websiteDataTypes) && session) {
         auto shouldComputeSize = fetchOptions.contains(WebsiteDataFetchOption::ComputeSizes) ? NetworkStorageManager::ShouldComputeSize::Yes : NetworkStorageManager::ShouldComputeSize::No;
-        session->storageManager().fetchData(websiteDataTypes, shouldComputeSize, [callbackAggregator](auto entries) mutable {
+        session->protectedStorageManager()->fetchData(websiteDataTypes, shouldComputeSize, [callbackAggregator](auto entries) mutable {
             callbackAggregator->m_websiteData.entries.appendVector(WTFMove(entries));
         });
     }
@@ -1696,7 +1709,7 @@ void NetworkProcess::deleteWebsiteData(PAL::SessionID sessionID, OptionSet<Websi
 #endif
 
     if (NetworkStorageManager::canHandleTypes(websiteDataTypes) && session)
-        session->storageManager().deleteDataModifiedSince(websiteDataTypes, modifiedSince, [clearTasksHandler] { });
+        session->protectedStorageManager()->deleteDataModifiedSince(websiteDataTypes, modifiedSince, [clearTasksHandler] { });
 }
 
 void NetworkProcess::deleteWebsiteDataForOrigin(PAL::SessionID sessionID, OptionSet<WebsiteDataType> websiteDataTypes, const ClientOrigin& origin, CompletionHandler<void()>&& completionHandler)
@@ -1731,7 +1744,7 @@ void NetworkProcess::deleteWebsiteDataForOrigin(PAL::SessionID sessionID, Option
         }
     }
     if (NetworkStorageManager::canHandleTypes(websiteDataTypes) && session)
-        session->storageManager().deleteData(websiteDataTypes, origin, [clearTasksHandler] { });
+        session->protectedStorageManager()->deleteData(websiteDataTypes, origin, [clearTasksHandler] { });
 
     bool clearServiceWorkers = websiteDataTypes.contains(WebsiteDataType::DOMCache) || websiteDataTypes.contains(WebsiteDataType::ServiceWorkerRegistrations);
     if (clearServiceWorkers && !sessionID.isEphemeral() && session)
@@ -1809,7 +1822,7 @@ void NetworkProcess::deleteWebsiteDataForOrigins(PAL::SessionID sessionID, Optio
     }
 
     if (NetworkStorageManager::canHandleTypes(websiteDataTypes) && session)
-        session->storageManager().deleteData(websiteDataTypes, originDatas, [clearTasksHandler] { });
+        session->protectedStorageManager()->deleteData(websiteDataTypes, originDatas, [clearTasksHandler] { });
 
     if (session) {
         HashSet<WebCore::RegistrableDomain> domainsToDeleteNetworkDataFor;
@@ -1977,7 +1990,7 @@ void NetworkProcess::deleteAndRestrictWebsiteDataForRegistrableDomains(PAL::Sess
     }
 
     if (NetworkStorageManager::canHandleTypes(websiteDataTypes) && session) {
-        session->storageManager().deleteDataForRegistrableDomains(websiteDataTypes, domainsToDeleteAllScriptWrittenStorageFor, [callbackAggregator](auto&& deletedDomains) mutable {
+        session->protectedStorageManager()->deleteDataForRegistrableDomains(websiteDataTypes, domainsToDeleteAllScriptWrittenStorageFor, [callbackAggregator](auto&& deletedDomains) mutable {
             for (auto domain : deletedDomains)
                 callbackAggregator->m_domains.add(WTFMove(domain));
         });
@@ -2088,7 +2101,7 @@ void NetworkProcess::registrableDomainsWithWebsiteData(PAL::SessionID sessionID,
     }
 
     if (session) {
-        session->storageManager().fetchData(websiteDataTypes, NetworkStorageManager::ShouldComputeSize::No, [callbackAggregator](auto entries) mutable {
+        session->protectedStorageManager()->fetchData(websiteDataTypes, NetworkStorageManager::ShouldComputeSize::No, [callbackAggregator](auto entries) mutable {
             callbackAggregator->m_websiteData.entries.appendVector(WTFMove(entries));
         });
     }
@@ -2264,7 +2277,7 @@ void NetworkProcess::prepareToSuspend(bool isSuspensionImminent, MonotonicTime e
 
     forEachNetworkSession([&] (auto& session) {
         platformFlushCookies(session.sessionID(), [callbackAggregator] { });
-        session.storageManager().suspend([callbackAggregator] { });
+        session.protectedStorageManager()->suspend([callbackAggregator] { });
     });
 
     for (auto& storageManager : m_closingStorageManagers)
@@ -2294,7 +2307,7 @@ void NetworkProcess::processDidResume(bool forForegroundActivity)
     PCM::PersistentStore::processDidResume();
 
     forEachNetworkSession([](auto& session) {
-        session.storageManager().resume();
+        session.protectedStorageManager()->resume();
     });
 
     for (auto& storageManager : m_closingStorageManagers)
@@ -2330,7 +2343,7 @@ void NetworkProcess::syncLocalStorage(CompletionHandler<void()>&& completionHand
 {
     auto aggregator = CallbackAggregator::create(WTFMove(completionHandler));
     forEachNetworkSession([&](auto& session) {
-        session.storageManager().syncLocalStorage([aggregator] { });
+        session.protectedStorageManager()->syncLocalStorage([aggregator] { });
     });
 }
 
@@ -2347,7 +2360,7 @@ void NetworkProcess::storeServiceWorkerRegistrations(PAL::SessionID sessionID, C
 void NetworkProcess::resetQuota(PAL::SessionID sessionID, CompletionHandler<void()>&& completionHandler)
 {
     if (auto* session = networkSession(sessionID))
-        return session->storageManager().resetQuotaForTesting(WTFMove(completionHandler));
+        return session->protectedStorageManager()->resetQuotaForTesting(WTFMove(completionHandler));
 
     completionHandler();
 }
@@ -2355,7 +2368,7 @@ void NetworkProcess::resetQuota(PAL::SessionID sessionID, CompletionHandler<void
 void NetworkProcess::setOriginQuotaRatioEnabledForTesting(PAL::SessionID sessionID, bool enabled, CompletionHandler<void()>&& completionHandler)
 {
     if (auto* session = networkSession(sessionID))
-        return session->storageManager().setOriginQuotaRatioEnabledForTesting(enabled, WTFMove(completionHandler));
+        return session->protectedStorageManager()->setOriginQuotaRatioEnabledForTesting(enabled, WTFMove(completionHandler));
 
     completionHandler();
 }
@@ -2363,7 +2376,7 @@ void NetworkProcess::setOriginQuotaRatioEnabledForTesting(PAL::SessionID session
 void NetworkProcess::resetStoragePersistedState(PAL::SessionID sessionID, CompletionHandler<void()>&& completionHandler)
 {
     if (auto* session = networkSession(sessionID))
-        session->storageManager().resetStoragePersistedState(WTFMove(completionHandler));
+        session->protectedStorageManager()->resetStoragePersistedState(WTFMove(completionHandler));
     else
         completionHandler();
 }
@@ -2371,13 +2384,13 @@ void NetworkProcess::resetStoragePersistedState(PAL::SessionID sessionID, Comple
 void NetworkProcess::cloneSessionStorageForWebPage(PAL::SessionID sessionID, WebPageProxyIdentifier sourcePage, WebPageProxyIdentifier destinationPage)
 {
     if (auto* session = networkSession(sessionID))
-        session->storageManager().cloneSessionStorageForWebPage(sourcePage, destinationPage);
+        session->protectedStorageManager()->cloneSessionStorageForWebPage(sourcePage, destinationPage);
 }
 
 void NetworkProcess::didIncreaseQuota(PAL::SessionID sessionID, ClientOrigin&& origin, QuotaIncreaseRequestIdentifier identifier, std::optional<uint64_t> newQuota)
 {
     if (auto* session = networkSession(sessionID))
-        session->storageManager().didIncreaseQuota(WTFMove(origin), identifier, newQuota);
+        session->protectedStorageManager()->didIncreaseQuota(WTFMove(origin), identifier, newQuota);
 }
 
 void NetworkProcess::renameOriginInWebsiteData(PAL::SessionID sessionID, SecurityOriginData&& oldOrigin, SecurityOriginData&& newOrigin, OptionSet<WebsiteDataType> dataTypes, CompletionHandler<void()>&& completionHandler)
@@ -2388,7 +2401,7 @@ void NetworkProcess::renameOriginInWebsiteData(PAL::SessionID sessionID, Securit
         return;
 
     if (auto* session = networkSession(sessionID))
-        session->storageManager().moveData(dataTypes, WTFMove(oldOrigin), WTFMove(newOrigin), [aggregator] { });
+        session->protectedStorageManager()->moveData(dataTypes, WTFMove(oldOrigin), WTFMove(newOrigin), [aggregator] { });
 }
 
 void NetworkProcess::websiteDataOriginDirectoryForTesting(PAL::SessionID sessionID, ClientOrigin&& origin, OptionSet<WebsiteDataType> dataType, CompletionHandler<void(const String&)>&& completionHandler)
@@ -2402,7 +2415,7 @@ void NetworkProcess::websiteDataOriginDirectoryForTesting(PAL::SessionID session
     if (!session)
         return completionHandler({ });
 
-    session->storageManager().getOriginDirectory(WTFMove(origin), *dataType.toSingleValue(), WTFMove(completionHandler));
+    session->protectedStorageManager()->getOriginDirectory(WTFMove(origin), *dataType.toSingleValue(), WTFMove(completionHandler));
 }
 
 void NetworkProcess::processNotificationEvent(NotificationData&& data, NotificationEventType eventType, CompletionHandler<void(bool)>&& callback)
@@ -2797,7 +2810,7 @@ void NetworkProcess::removeKeptAliveLoad(NetworkResourceLoader& loader)
 void NetworkProcess::connectionToWebProcessClosed(IPC::Connection& connection, PAL::SessionID sessionID)
 {
     if (auto* session = networkSession(sessionID))
-        session->storageManager().stopReceivingMessageFromConnection(connection);
+        session->protectedStorageManager()->stopReceivingMessageFromConnection(connection);
 }
 
 WebCore::ProcessIdentifier NetworkProcess::webProcessIdentifierForConnection(IPC::Connection& connection) const
@@ -2949,7 +2962,7 @@ void NetworkProcess::removeWebPageNetworkParameters(PAL::SessionID sessionID, We
         return;
 
     session->removeWebPageNetworkParameters(pageID);
-    session->storageManager().clearStorageForWebPage(pageID);
+    session->protectedStorageManager()->clearStorageForWebPage(pageID);
 
     if (auto* resourceLoadStatistics = session->resourceLoadStatistics())
         resourceLoadStatistics->clearFrameLoadRecordsForStorageAccess(pageID);
@@ -2975,25 +2988,15 @@ void NetworkProcess::setIsHoldingLockedFiles(bool isHoldingLockedFiles)
 #else
     if (!isHoldingLockedFiles) {
         m_holdingLockedFileAssertion = nullptr;
-#if USE(EXTENSIONKIT)
-        invalidateFileActivity();
-#endif
         return;
     }
 
     if (m_holdingLockedFileAssertion && m_holdingLockedFileAssertion->isValid())
         return;
 
-#if USE(EXTENSIONKIT)
-    if (hasAcquiredFileActivity())
-        return;
-    if (acquireLockedFileActivity())
-        return;
-#endif
-
     // We synchronously take a process assertion when beginning a SQLite transaction so that we don't get suspended
     // while holding a locked file. We would get killed if suspended while holding locked files.
-    m_holdingLockedFileAssertion = ProcessAssertion::create(getCurrentProcessID(), "Network Process is holding locked files"_s, ProcessAssertionType::FinishTaskInterruptable, ProcessAssertion::Mode::Sync);
+    m_holdingLockedFileAssertion = ProcessAssertion::create(getCurrentProcessID(), "Network Process is holding locked files"_s, ProcessAssertionType::FinishTaskCanSleep, ProcessAssertion::Mode::Sync);
 #endif
 }
 #endif
@@ -3002,6 +3005,12 @@ void NetworkProcess::setInspectionForServiceWorkersAllowed(PAL::SessionID sessio
 {
     if (auto* session = networkSession(sessionID))
         session->setInspectionForServiceWorkersAllowed(inspectable);
+}
+
+void NetworkProcess::setStorageSiteValidationEnabled(PAL::SessionID sessionID, bool enabled)
+{
+    if (auto* session = networkSession(sessionID))
+        session->protectedStorageManager()->setStorageSiteValidationEnabled(enabled);
 }
 
 } // namespace WebKit

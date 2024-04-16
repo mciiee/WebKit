@@ -1093,6 +1093,7 @@ set(WebCore_NON_SVG_IDL_FILES
     dom/FocusOptions.idl
     dom/FormDataEvent.idl
     dom/FullscreenOptions.idl
+    dom/GetHTMLOptions.idl
     dom/GlobalEventHandlers+PointerEvents.idl
     dom/GlobalEventHandlers+Selection.idl
     dom/GlobalEventHandlers.idl
@@ -1371,7 +1372,6 @@ set(WebCore_NON_SVG_IDL_FILES
     page/LocalDOMWindow+RequestIdleCallback.idl
     page/LocalDOMWindow+Selection.idl
     page/LocalDOMWindow+VisualViewport.idl
-    page/LocalDOMWindow.idl
     page/Location.idl
     page/NavigateEvent.idl
     page/Navigation.idl
@@ -1410,7 +1410,6 @@ set(WebCore_NON_SVG_IDL_FILES
     page/PerformanceResourceTiming.idl
     page/PerformanceServerTiming.idl
     page/PerformanceTiming.idl
-    page/RemoteDOMWindow.idl
     page/ResizeObserver.idl
     page/ResizeObserverBoxOptions.idl
     page/ResizeObserverCallback.idl
@@ -1515,7 +1514,6 @@ set(WebCore_SVG_IDL_FILES
     svg/Document+SVG.idl
     svg/SVGAElement.idl
     svg/SVGAngle.idl
-    svg/SVGAnimateColorElement.idl
     svg/SVGAnimateElement.idl
     svg/SVGAnimateMotionElement.idl
     svg/SVGAnimateTransformElement.idl
@@ -2843,8 +2841,6 @@ list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/mediastream/MDNSRegisterError.serialization.in
 
     platform/network/ProtectionSpaceBase.serialization.in
-
-    platform/network/soup/SoupNetworkProxySettings.serialization.in
 )
 
 WEBKIT_COPY_FILES(WebCore_CopyPrivateHeaders

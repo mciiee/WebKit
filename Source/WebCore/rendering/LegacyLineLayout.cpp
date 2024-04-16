@@ -34,11 +34,10 @@
 #include "InlineIteratorTextBox.h"
 #include "InlineTextBoxStyle.h"
 #include "InlineWalker.h"
-#include "LegacyInlineFlowBoxInlines.h"
 #include "LegacyInlineIterator.h"
 #include "LegacyInlineTextBox.h"
+#include "LineInfo.h"
 #include "LineInlineHeaders.h"
-#include "LineLayoutState.h"
 #include "Logging.h"
 #include "RenderBlockFlowInlines.h"
 #include "RenderFragmentContainer.h"
@@ -171,12 +170,12 @@ LegacyInlineBox* LegacyLineLayout::createInlineBoxForRenderer(RenderObject* rend
     return nullptr;
 }
 
-static inline void dirtyLineBoxesForRenderer(RenderObject& renderer, bool fullLayout)
+static inline void dirtyLineBoxesForRenderer(RenderObject& renderer)
 {
     if (CheckedPtr renderText = dynamicDowncast<RenderText>(renderer))
-        renderText->dirtyLineBoxes(fullLayout);
+        renderText->dirtyLineBoxes(true);
     else if (CheckedPtr renderInline = dynamicDowncast<RenderInline>(renderer))
-        renderInline->dirtyLineBoxes(fullLayout);
+        renderInline->dirtyLineBoxes(true);
 }
 
 static bool parentIsConstructedOrHaveNext(LegacyInlineFlowBox* parentBox)
@@ -197,7 +196,7 @@ LegacyInlineFlowBox* LegacyLineLayout::createLineBoxes(RenderObject* obj, const 
     LegacyInlineFlowBox* parentBox = nullptr;
     LegacyInlineFlowBox* result = nullptr;
     do {
-        RenderInline* inlineFlow = obj != &m_flow ? &checkedDowncast<RenderInline>(*obj) : nullptr;
+        RenderInline* inlineFlow = obj != &m_flow ? &downcast<RenderInline>(*obj) : nullptr;
 
         // Get the last box we made for this render object.
         parentBox = inlineFlow ? inlineFlow->lastLineBox() : downcast<RenderBlockFlow>(*obj).lastRootBox();
@@ -288,108 +287,6 @@ LegacyRootInlineBox* LegacyLineLayout::constructLine(BidiRunList<BidiRun>& bidiR
     return lastRootBox();
 }
 
-static void updateLogicalWidthForLeftAlignedBlock(bool isLeftToRightDirection, BidiRun* trailingSpaceRun, float& logicalLeft, float& totalLogicalWidth, float availableLogicalWidth)
-{
-    // The direction of the block should determine what happens with wide lines.
-    // In particular with RTL blocks, wide lines should still spill out to the left.
-    if (isLeftToRightDirection) {
-        if (totalLogicalWidth > availableLogicalWidth && trailingSpaceRun)
-            trailingSpaceRun->box()->setLogicalWidth(std::max<float>(0, trailingSpaceRun->box()->logicalWidth() - totalLogicalWidth + availableLogicalWidth));
-        return;
-    }
-
-    if (trailingSpaceRun)
-        trailingSpaceRun->box()->setLogicalWidth(0);
-    else if (totalLogicalWidth > availableLogicalWidth)
-        logicalLeft -= (totalLogicalWidth - availableLogicalWidth);
-}
-
-static void updateLogicalWidthForRightAlignedBlock(bool isLeftToRightDirection, BidiRun* trailingSpaceRun, float& logicalLeft, float& totalLogicalWidth, float availableLogicalWidth)
-{
-    // Wide lines spill out of the block based off direction.
-    // So even if text-align is right, if direction is LTR, wide lines should overflow out of the right
-    // side of the block.
-    if (isLeftToRightDirection) {
-        if (trailingSpaceRun) {
-            totalLogicalWidth -= trailingSpaceRun->box()->logicalWidth();
-            trailingSpaceRun->box()->setLogicalWidth(0);
-        }
-        logicalLeft += std::max(0.f, availableLogicalWidth - totalLogicalWidth);
-        return;
-    }
-
-    if (totalLogicalWidth > availableLogicalWidth && trailingSpaceRun) {
-        trailingSpaceRun->box()->setLogicalWidth(std::max<float>(0, trailingSpaceRun->box()->logicalWidth() - totalLogicalWidth + availableLogicalWidth));
-        totalLogicalWidth -= trailingSpaceRun->box()->logicalWidth();
-    } else
-        logicalLeft += availableLogicalWidth - totalLogicalWidth;
-}
-
-static void updateLogicalWidthForCenterAlignedBlock(bool isLeftToRightDirection, BidiRun* trailingSpaceRun, float& logicalLeft, float& totalLogicalWidth, float availableLogicalWidth)
-{
-    float trailingSpaceWidth = 0;
-    if (trailingSpaceRun) {
-        totalLogicalWidth -= trailingSpaceRun->box()->logicalWidth();
-        trailingSpaceWidth = std::min(trailingSpaceRun->box()->logicalWidth(), (availableLogicalWidth - totalLogicalWidth + 1) / 2);
-        trailingSpaceRun->box()->setLogicalWidth(std::max<float>(0, trailingSpaceWidth));
-    }
-    if (isLeftToRightDirection)
-        logicalLeft += std::max<float>((availableLogicalWidth - totalLogicalWidth) / 2, 0);
-    else
-        logicalLeft += totalLogicalWidth > availableLogicalWidth ? (availableLogicalWidth - totalLogicalWidth) : (availableLogicalWidth - totalLogicalWidth) / 2 - trailingSpaceWidth;
-}
-
-void LegacyLineLayout::updateLogicalWidthForAlignment(RenderBlockFlow& flow, const TextAlignMode& textAlign, const LegacyRootInlineBox* rootInlineBox, BidiRun* trailingSpaceRun, float& logicalLeft, float& totalLogicalWidth, float& availableLogicalWidth, int expansionOpportunityCount)
-{
-    TextDirection direction;
-    if (rootInlineBox && flow.style().unicodeBidi() == UnicodeBidi::Plaintext)
-        direction = rootInlineBox->direction();
-    else
-        direction = flow.style().direction();
-
-    bool isLeftToRightDirection = flow.style().isLeftToRightDirection();
-
-    // Armed with the total width of the line (without justification),
-    // we now examine our text-align property in order to determine where to position the
-    // objects horizontally. The total width of the line can be increased if we end up
-    // justifying text.
-    switch (textAlign) {
-    case TextAlignMode::Left:
-    case TextAlignMode::WebKitLeft:
-        updateLogicalWidthForLeftAlignedBlock(isLeftToRightDirection, trailingSpaceRun, logicalLeft, totalLogicalWidth, availableLogicalWidth);
-        break;
-    case TextAlignMode::Right:
-    case TextAlignMode::WebKitRight:
-        updateLogicalWidthForRightAlignedBlock(isLeftToRightDirection, trailingSpaceRun, logicalLeft, totalLogicalWidth, availableLogicalWidth);
-        break;
-    case TextAlignMode::Center:
-    case TextAlignMode::WebKitCenter:
-        updateLogicalWidthForCenterAlignedBlock(isLeftToRightDirection, trailingSpaceRun, logicalLeft, totalLogicalWidth, availableLogicalWidth);
-        break;
-    case TextAlignMode::Justify:
-        if (expansionOpportunityCount) {
-            if (trailingSpaceRun) {
-                totalLogicalWidth -= trailingSpaceRun->box()->logicalWidth();
-                trailingSpaceRun->box()->setLogicalWidth(0);
-            }
-            break;
-        }
-        FALLTHROUGH;
-    case TextAlignMode::Start:
-        if (direction == TextDirection::LTR)
-            updateLogicalWidthForLeftAlignedBlock(isLeftToRightDirection, trailingSpaceRun, logicalLeft, totalLogicalWidth, availableLogicalWidth);
-        else
-            updateLogicalWidthForRightAlignedBlock(isLeftToRightDirection, trailingSpaceRun, logicalLeft, totalLogicalWidth, availableLogicalWidth);
-        break;
-    case TextAlignMode::End:
-        if (direction == TextDirection::LTR)
-            updateLogicalWidthForRightAlignedBlock(isLeftToRightDirection, trailingSpaceRun, logicalLeft, totalLogicalWidth, availableLogicalWidth);
-        else
-            updateLogicalWidthForLeftAlignedBlock(isLeftToRightDirection, trailingSpaceRun, logicalLeft, totalLogicalWidth, availableLogicalWidth);
-        break;
-    }
-}
-
 void LegacyLineLayout::removeInlineBox(BidiRun& run, const LegacyRootInlineBox& rootLineBox) const
 {
     auto* inlineBox = run.box();
@@ -434,81 +331,6 @@ void LegacyLineLayout::removeEmptyTextBoxesAndUpdateVisualReordering(LegacyRootI
     }
 }
 
-static inline bool isCollapsibleSpace(UChar character, const RenderText& renderer)
-{
-    if (character == ' ' || character == '\t' || character == softHyphen)
-        return true;
-    if (character == '\n')
-        return !renderer.style().preserveNewline();
-    if (character == noBreakSpace)
-        return renderer.style().nbspMode() == NBSPMode::Space;
-    return false;
-}
-
-template <typename CharacterType>
-static inline unsigned findFirstTrailingSpace(const RenderText& lastText, const CharacterType* characters, unsigned start, unsigned stop)
-{
-    unsigned firstSpace = stop;
-    while (firstSpace > start) {
-        UChar current = characters[firstSpace - 1];
-        if (!isCollapsibleSpace(current, lastText))
-            break;
-        firstSpace--;
-    }
-
-    return firstSpace;
-}
-
-inline BidiRun* LegacyLineLayout::handleTrailingSpaces(BidiRunList<BidiRun>& bidiRuns, BidiContext* currentContext)
-{
-    if (!bidiRuns.runCount()
-        || !bidiRuns.logicallyLastRun()->renderer().style().breakOnlyAfterWhiteSpace()
-        || !bidiRuns.logicallyLastRun()->renderer().style().autoWrap())
-        return nullptr;
-
-    BidiRun* trailingSpaceRun = bidiRuns.logicallyLastRun();
-    CheckedPtr lastText = dynamicDowncast<RenderText>(trailingSpaceRun->renderer());
-    if (!lastText)
-        return nullptr;
-
-    unsigned firstSpace;
-    if (lastText->text().is8Bit())
-        firstSpace = findFirstTrailingSpace(*lastText, lastText->text().characters8(), trailingSpaceRun->start(), trailingSpaceRun->stop());
-    else
-        firstSpace = findFirstTrailingSpace(*lastText, lastText->text().characters16(), trailingSpaceRun->start(), trailingSpaceRun->stop());
-
-    if (firstSpace == trailingSpaceRun->stop())
-        return nullptr;
-
-    TextDirection direction = style().direction();
-    bool shouldReorder = trailingSpaceRun != (direction == TextDirection::LTR ? bidiRuns.lastRun() : bidiRuns.firstRun());
-    if (firstSpace != trailingSpaceRun->start()) {
-        BidiContext* baseContext = currentContext;
-        while (BidiContext* parent = baseContext->parent())
-            baseContext = parent;
-
-        std::unique_ptr<BidiRun> newTrailingRun = makeUnique<BidiRun>(firstSpace, trailingSpaceRun->m_stop, trailingSpaceRun->renderer(), baseContext, U_OTHER_NEUTRAL);
-        trailingSpaceRun->m_stop = firstSpace;
-        trailingSpaceRun = newTrailingRun.get();
-        if (direction == TextDirection::LTR)
-            bidiRuns.appendRun(WTFMove(newTrailingRun));
-        else
-            bidiRuns.prependRun(WTFMove(newTrailingRun));
-        return trailingSpaceRun;
-    }
-    if (!shouldReorder)
-        return trailingSpaceRun;
-
-    if (direction == TextDirection::LTR) {
-        bidiRuns.moveRunToEnd(trailingSpaceRun);
-        trailingSpaceRun->m_level = 0;
-    } else {
-        bidiRuns.moveRunToBeginning(trailingSpaceRun);
-        trailingSpaceRun->m_level = 1;
-    }
-    return trailingSpaceRun;
-}
-
 static inline void notifyResolverToResumeInIsolate(InlineBidiResolver& resolver, RenderObject* root, RenderObject* startObject)
 {
     if (root != startObject) {
@@ -529,13 +351,13 @@ static inline void setUpResolverToResumeInIsolate(InlineBidiResolver& resolver, 
 }
 
 // FIXME: BidiResolver should have this logic.
-static inline void constructBidiRunsForSegment(InlineBidiResolver& topResolver, BidiRunList<BidiRun>& bidiRuns, const LegacyInlineIterator& endOfRuns, VisualDirectionOverride override, bool previousLineBrokeCleanly)
+static inline void constructBidiRunsForSegment(InlineBidiResolver& topResolver, BidiRunList<BidiRun>& bidiRuns, const LegacyInlineIterator& endOfRuns, VisualDirectionOverride override)
 {
     // FIXME: We should pass a BidiRunList into createBidiRunsForLine instead
     // of the resolver owning the runs.
     ASSERT(&topResolver.runs() == &bidiRuns);
     ASSERT(topResolver.position() != endOfRuns);
-    topResolver.createBidiRunsForLine(endOfRuns, override, previousLineBrokeCleanly);
+    topResolver.createBidiRunsForLine(endOfRuns, override);
 
     while (!topResolver.isolatedRuns().isEmpty()) {
         // It does not matter which order we resolve the runs as long as we resolve them all.
@@ -572,9 +394,7 @@ static inline void constructBidiRunsForSegment(InlineBidiResolver& topResolver, 
         isolatedResolver.setPositionIgnoringNestedIsolates(iter);
 
         // We stop at the next end of line; we may re-enter this isolate in the next call to constructBidiRuns().
-        // FIXME: What should end and previousLineBrokeCleanly be?
-        // rniwa says previousLineBrokeCleanly is just a WinIE hack and could always be false here?
-        isolatedResolver.createBidiRunsForLine(endOfRuns, NoVisualOverride, previousLineBrokeCleanly);
+        isolatedResolver.createBidiRunsForLine(endOfRuns, NoVisualOverride);
         // Note that we do not delete the runs from the resolver.
         // We're not guaranteed to get any BidiRuns in the previous step. If we don't, we allow the placeholder
         // itself to be turned into an InlineBox. We can't remove it here without potentially losing track of
@@ -607,13 +427,10 @@ LegacyRootInlineBox* LegacyLineLayout::createLineBoxesFromBidiRuns(unsigned bidi
         return nullptr;
 
     lineBox->setBidiLevel(bidiLevel);
-    lineBox->setEndsWithBreak(lineInfo.previousLineBrokeCleanly());
-    
+
     bool isSVGRootInlineBox = is<SVGRootInlineBox>(*lineBox);
     ASSERT(isSVGRootInlineBox);
 
-    GlyphOverflowAndFallbackFontsMap textBoxDataMap;
-    
     // Now we position all of our text runs horizontally.
 
     removeEmptyTextBoxesAndUpdateVisualReordering(lineBox, bidiRuns.firstRun());
@@ -627,24 +444,11 @@ LegacyRootInlineBox* LegacyLineLayout::createLineBoxesFromBidiRuns(unsigned bidi
         RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(m_flow.isRenderSVGText());
         downcast<SVGRootInlineBox>(*lineBox).computePerCharacterLayoutInformation();
     }
-    
-    // Compute our overflow now.
-    lineBox->computeOverflow(lineBox->lineTop(), lineBox->lineBottom(), textBoxDataMap);
-    
-    return lineBox;
-}
 
-static void deleteLineRange(LineLayoutState& layoutState, LegacyRootInlineBox* startLine, LegacyRootInlineBox* stopLine = 0)
-{
-    LegacyRootInlineBox* boxToDelete = startLine;
-    while (boxToDelete && boxToDelete != stopLine) {
-        layoutState.updateRepaintRangeFromBox(boxToDelete);
-        // Note: deleteLineRange(firstRootBox()) is not identical to deleteLineBoxTree().
-        // deleteLineBoxTree uses nextLineBox() instead of nextRootBox() when traversing.
-        LegacyRootInlineBox* next = boxToDelete->nextRootBox();
-        boxToDelete->deleteLine();
-        boxToDelete = next;
-    }
+    GlyphOverflowAndFallbackFontsMap textBoxDataMap;
+    lineBox->computeOverflow(lineBox->lineTop(), lineBox->lineBottom(), textBoxDataMap);
+
+    return lineBox;
 }
 
 static void repaintSelfPaintInlineBoxes(const LegacyRootInlineBox& firstRootInlineBox, const LegacyRootInlineBox& lastRootInlineBox)
@@ -661,16 +465,20 @@ static void repaintSelfPaintInlineBoxes(const LegacyRootInlineBox& firstRootInli
     }
 }
 
-void LegacyLineLayout::layoutRunsAndFloats(LineLayoutState& layoutState, bool hasInlineChild)
+void LegacyLineLayout::layoutRunsAndFloats(bool hasInlineChild)
 {
-    // We want to skip ahead to the first dirty line
-    InlineBidiResolver resolver;
-    LegacyRootInlineBox* startLine = determineStartPosition(layoutState, resolver);
+    m_lineBoxes.deleteLineBoxTree();
 
-    // FIXME: This would make more sense outside of this function, but since
-    // determineStartPosition can change the fullLayout flag we have to do this here. Failure to call
-    // determineStartPosition first will break fast/repaint/line-flow-with-floats-9.html.
-    if (layoutState.isFullLayout() && hasInlineChild && !m_flow.selfNeedsLayout()) {
+    TextDirection direction = style().direction();
+    if (style().unicodeBidi() == UnicodeBidi::Plaintext)
+        determineDirectionality(direction, LegacyInlineIterator(&m_flow, firstInlineRendererSkippingEmpty(m_flow), 0));
+
+    InlineBidiResolver resolver;
+    resolver.setStatus(BidiStatus(direction, isOverride(style().unicodeBidi())));
+    LegacyInlineIterator iter = LegacyInlineIterator(&m_flow, firstInlineRendererSkippingEmpty(m_flow, &resolver), 0);
+    resolver.setPosition(iter, numberOfIsolateAncestors(iter));
+
+    if (hasInlineChild && !m_flow.selfNeedsLayout()) {
         m_flow.setNeedsLayout(MarkOnlyThis); // Mark as needing a full layout to force us to repaint.
         if (!layoutContext().needsFullRepaint() && m_flow.cachedLayerClippedOverflowRect()) {
             // Because we waited until we were already inside layout to discover
@@ -681,54 +489,29 @@ void LegacyLineLayout::layoutRunsAndFloats(LineLayoutState& layoutState, bool ha
         }
     }
 
-    // We also find the first clean line and extract these lines. We will add them back
-    // if we determine that we're able to synchronize after handling all our dirty lines.
-    LegacyInlineIterator cleanLineStart;
-    if (!layoutState.isFullLayout() && startLine)
-        determineEndPosition(layoutState, startLine, cleanLineStart);
-
-    if (startLine) {
-        if (!layoutState.usesRepaintBounds())
-            layoutState.setRepaintRange(m_flow.logicalHeight());
-        deleteLineRange(layoutState, startLine);
-    }
-
-    layoutRunsAndFloatsInRange(layoutState, resolver, cleanLineStart);
-    linkToEndLineIfNeeded(layoutState);
+    layoutRunsAndFloatsInRange(resolver);
     if (firstRootBox())
-        repaintSelfPaintInlineBoxes(*firstRootBox(), layoutState.endLine() ? *layoutState.endLine() : *lastRootBox());
+        repaintSelfPaintInlineBoxes(*firstRootBox(), *lastRootBox());
 }
 
-void LegacyLineLayout::layoutRunsAndFloatsInRange(LineLayoutState& layoutState, InlineBidiResolver& resolver, const LegacyInlineIterator& cleanLineStart)
+void LegacyLineLayout::layoutRunsAndFloatsInRange(InlineBidiResolver& resolver)
 {
     const RenderStyle& styleToUse = style();
     LineWhitespaceCollapsingState& lineWhitespaceCollapsingState = resolver.whitespaceCollapsingState();
     LegacyInlineIterator end = resolver.position();
-    bool checkForEndLineMatch = layoutState.endLine();
     RenderTextInfo renderTextInfo;
 
+    LineInfo lineInfo { };
     LineBreaker lineBreaker(m_flow);
 
     while (!end.atEnd()) {
-        // FIXME: Is this check necessary before the first iteration or can it be moved to the end?
-        if (checkForEndLineMatch) {
-            layoutState.setEndLineMatched(matchedEndLine(layoutState, resolver, cleanLineStart));
-            if (layoutState.endLineMatched()) {
-                resolver.setPosition(LegacyInlineIterator(resolver.position().root(), 0, 0), 0);
-                layoutState.marginInfo().clearMargin();
-                break;
-            }
-        }
-
         lineWhitespaceCollapsingState.reset();
 
-        layoutState.lineInfo().setEmpty(true);
-        layoutState.lineInfo().resetRunsFromLeadingWhitespace();
-
-        bool isNewUBAParagraph = layoutState.lineInfo().previousLineBrokeCleanly();
+        lineInfo.setEmpty(true);
+        lineInfo.resetRunsFromLeadingWhitespace();
 
         WordMeasurements wordMeasurements;
-        end = lineBreaker.nextLineBreak(resolver, layoutState.lineInfo(), renderTextInfo, wordMeasurements);
+        end = lineBreaker.nextLineBreak(resolver, lineInfo, renderTextInfo, wordMeasurements);
         m_flow.cachePriorCharactersIfNeeded(renderTextInfo.lineBreakIteratorFactory);
         renderTextInfo.lineBreakIteratorFactory.priorContext().reset();
         if (resolver.position().atEnd()) {
@@ -742,85 +525,40 @@ void LegacyLineLayout::layoutRunsAndFloatsInRange(LineLayoutState& layoutState, 
 
         ASSERT(end != resolver.position());
 
-        // This is a short-cut for empty lines.
-        if (layoutState.lineInfo().isEmpty()) {
-            if (lastRootBox())
-                lastRootBox()->setLineBreakInfo(end.renderer(), end.offset(), resolver.status());
-        } else {
+        if (!lineInfo.isEmpty()) {
             VisualDirectionOverride override = (styleToUse.rtlOrdering() == Order::Visual ? (styleToUse.direction() == TextDirection::LTR ? VisualLeftToRightOverride : VisualRightToLeftOverride) : NoVisualOverride);
 
-            if (isNewUBAParagraph && styleToUse.unicodeBidi() == UnicodeBidi::Plaintext && !resolver.context()->parent()) {
+            if (styleToUse.unicodeBidi() == UnicodeBidi::Plaintext && !resolver.context()->parent()) {
                 TextDirection direction = styleToUse.direction();
                 determineDirectionality(direction, resolver.position());
                 resolver.setStatus(BidiStatus(direction, isOverride(styleToUse.unicodeBidi())));
             }
             // FIXME: This ownership is reversed. We should own the BidiRunList and pass it to createBidiRunsForLine.
             BidiRunList<BidiRun>& bidiRuns = resolver.runs();
-            constructBidiRunsForSegment(resolver, bidiRuns, end, override, layoutState.lineInfo().previousLineBrokeCleanly());
+            constructBidiRunsForSegment(resolver, bidiRuns, end, override);
             ASSERT(resolver.position() == end);
 
-            if (!layoutState.lineInfo().previousLineBrokeCleanly())
-                handleTrailingSpaces(bidiRuns, resolver.context());
-
             // Now that the runs have been ordered, we create the line boxes.
-            // At the same time we figure out where border/padding/margin should be applied for
-            // inline flow boxes.
 
-            LegacyRootInlineBox* lineBox = createLineBoxesFromBidiRuns(resolver.status().context->level(), bidiRuns, end, layoutState.lineInfo());
+            createLineBoxesFromBidiRuns(resolver.status().context->level(), bidiRuns, end, lineInfo);
 
             bidiRuns.clear();
             resolver.markCurrentRunEmpty(); // FIXME: This can probably be replaced by an ASSERT (or just removed).
-
-            if (lineBox) {
-                lineBox->setLineBreakInfo(end.renderer(), end.offset(), resolver.status());
-                if (layoutState.usesRepaintBounds())
-                    layoutState.updateRepaintRangeFromBox(lineBox);
-
-                layoutState.marginInfo().setAtBeforeSideOfBlock(false);
-            }
         }
 
-        if (!layoutState.lineInfo().isEmpty())
-            layoutState.lineInfo().setFirstLine(false);
+        if (!lineInfo.isEmpty())
+            lineInfo.setFirstLine(false);
 
         lineWhitespaceCollapsingState.reset();
         resolver.setPosition(end, numberOfIsolateAncestors(end));
     }
 }
 
-void LegacyLineLayout::linkToEndLineIfNeeded(LineLayoutState& layoutState)
+void LegacyLineLayout::layoutLineBoxes()
 {
-    auto* firstCleanLine = layoutState.endLine();
-    if (firstCleanLine) {
-        if (layoutState.endLineMatched()) {
-            // Attach all the remaining lines, and then adjust their y-positions as needed.
-            LayoutUnit delta = m_flow.logicalHeight() - layoutState.endLineLogicalTop();
-            for (auto* line = firstCleanLine; line; line = line->nextRootBox()) {
-                line->attachLine();
-                if (delta) {
-                    layoutState.updateRepaintRangeFromBox(line, delta);
-                    line->adjustBlockDirectionPosition(delta);
-                }
-            }
-            m_flow.setLogicalHeight(lastRootBox()->lineBoxBottom());
-        } else {
-            // Delete all the remaining lines.
-            deleteLineRange(layoutState, layoutState.endLine());
-        }
-    }
-}
+    m_flow.setLogicalHeight(0_lu);
 
-void LegacyLineLayout::layoutLineBoxes(bool relayoutChildren, LayoutUnit& repaintLogicalTop, LayoutUnit& repaintLogicalBottom)
-{
-    m_flow.setLogicalHeight(m_flow.borderAndPaddingBefore());
-
-    // Figure out if we should clear out our line boxes.
-    // FIXME: Handle resize eventually!
-    bool isFullLayout = !firstRootBox() || m_flow.selfNeedsLayout() || relayoutChildren;
-    LineLayoutState layoutState(m_flow, isFullLayout, repaintLogicalTop, repaintLogicalBottom);
-
-    if (isFullLayout)
-        lineBoxes().deleteLineBoxes();
+    lineBoxes().deleteLineBoxes();
 
     if (m_flow.firstChild()) {
         // In full layout mode, clear the line boxes of children upfront. Otherwise,
@@ -829,170 +567,28 @@ void LegacyLineLayout::layoutLineBoxes(bool relayoutChildren, LayoutUnit& repain
         // deleted and only dirtied. In that case, we can layout the replaced
         // elements at the same time.
         bool hasInlineChild = false;
-        auto hasDirtyRenderCounterWithInlineBoxParent = false;
-        Vector<RenderBox*> replacedChildren;
         for (InlineWalker walker(m_flow); !walker.atEnd(); walker.advance()) {
             RenderObject& o = *walker.current();
 
             if (!hasInlineChild && o.isInline())
                 hasInlineChild = true;
 
-            if (layoutState.isFullLayout() || o.selfNeedsLayout()) {
-                dirtyLineBoxesForRenderer(o, layoutState.isFullLayout());
-                hasDirtyRenderCounterWithInlineBoxParent = hasDirtyRenderCounterWithInlineBoxParent || (is<RenderCounter>(o) && is<RenderInline>(o.parent()));
-            }
+            dirtyLineBoxesForRenderer(o);
             o.clearNeedsLayout();
         }
 
-        for (size_t i = 0; i < replacedChildren.size(); i++)
-            replacedChildren[i]->layoutIfNeeded();
-
-        auto clearNeedsLayoutIfNeeded = [&] {
-            if (!hasDirtyRenderCounterWithInlineBoxParent)
-                return;
-            for (InlineWalker walker(m_flow); !walker.atEnd(); walker.advance()) {
-                auto& renderer = *walker.current();
-                if (is<RenderCounter>(renderer) || is<RenderInline>(renderer))
-                    renderer.clearNeedsLayout();
-            }
-        };
-        clearNeedsLayoutIfNeeded();
-
-        layoutRunsAndFloats(layoutState, hasInlineChild);
+        layoutRunsAndFloats(hasInlineChild);
     }
-
-    // Now do the handling of the bottom of the block, adding in our bottom border/padding and
-    // determining the correct collapsed bottom margin information. This collapse is only necessary
-    // if our last child was an anonymous inline block that might need to propagate margin information out to
-    // us.
-    LayoutUnit afterEdge = m_flow.borderAndPaddingAfter() + m_flow.scrollbarLogicalHeight();
-    m_flow.setLogicalHeight(m_flow.logicalHeight() + afterEdge);
 
     if (!firstRootBox() && m_flow.hasLineIfEmpty())
         m_flow.setLogicalHeight(m_flow.logicalHeight() + m_flow.lineHeight(true, m_flow.isHorizontalWritingMode() ? HorizontalLine : VerticalLine, PositionOfInteriorLineBoxes));
 }
 
-LegacyRootInlineBox* LegacyLineLayout::determineStartPosition(LineLayoutState& layoutState, InlineBidiResolver& resolver)
-{
-    LegacyRootInlineBox* currentLine = nullptr;
-    LegacyRootInlineBox* lastLine = nullptr;
-
-    if (layoutState.isFullLayout()) {
-        m_lineBoxes.deleteLineBoxTree();
-        ASSERT(!firstRootBox() && !lastRootBox());
-    } else {
-        for (currentLine = firstRootBox(); currentLine && !currentLine->isDirty(); currentLine = currentLine->nextRootBox()) { }
-        if (currentLine) {
-            // We have a dirty line.
-            if (LegacyRootInlineBox* prevRootBox = currentLine->prevRootBox()) {
-                // We have a previous line.
-                if (!prevRootBox->endsWithBreak()
-                    || !prevRootBox->lineBreakObj()
-                    || (is<RenderText>(*prevRootBox->lineBreakObj())
-                    && prevRootBox->lineBreakPos() >= downcast<RenderText>(*prevRootBox->lineBreakObj()).text().length())) {
-                    // The previous line didn't break cleanly or broke at a newline
-                    // that has been deleted, so treat it as dirty too.
-                    currentLine = prevRootBox;
-                }
-            }
-        }
-        // If we have no dirty lines, then last is just the last root box.
-        lastLine = currentLine ? currentLine->prevRootBox() : lastRootBox();
-    }
-
-    layoutState.lineInfo().setFirstLine(!lastLine);
-    layoutState.lineInfo().setPreviousLineBrokeCleanly(!lastLine || lastLine->endsWithBreak());
-
-    if (lastLine) {
-        m_flow.setLogicalHeight(lastLine->lineBoxBottom());
-        LegacyInlineIterator iter = LegacyInlineIterator(&m_flow, lastLine->lineBreakObj(), lastLine->lineBreakPos());
-        resolver.setPosition(iter, numberOfIsolateAncestors(iter));
-        resolver.setStatus(lastLine->lineBreakBidiStatus());
-    } else {
-        TextDirection direction = style().direction();
-        if (style().unicodeBidi() == UnicodeBidi::Plaintext)
-            determineDirectionality(direction, LegacyInlineIterator(&m_flow, firstInlineRendererSkippingEmpty(m_flow), 0));
-        resolver.setStatus(BidiStatus(direction, isOverride(style().unicodeBidi())));
-        LegacyInlineIterator iter = LegacyInlineIterator(&m_flow, firstInlineRendererSkippingEmpty(m_flow, &resolver), 0);
-        resolver.setPosition(iter, numberOfIsolateAncestors(iter));
-    }
-    return currentLine;
-}
-
-void LegacyLineLayout::determineEndPosition(LineLayoutState& layoutState, LegacyRootInlineBox* startLine, LegacyInlineIterator& cleanLineStart)
-{
-    ASSERT(!layoutState.endLine());
-    LegacyRootInlineBox* lastLine = nullptr;
-    for (auto* currentLine = startLine->nextRootBox(); currentLine; currentLine = currentLine->nextRootBox()) {
-        if (currentLine->isDirty())
-            lastLine = nullptr;
-        else if (!lastLine)
-            lastLine = currentLine;
-    }
-
-    if (!lastLine)
-        return;
-
-    // At this point, |last| is the first line in a run of clean lines that ends with the last line
-    // in the block.
-    LegacyRootInlineBox* previousLine = lastLine->prevRootBox();
-    cleanLineStart = LegacyInlineIterator(&m_flow, previousLine->lineBreakObj(), previousLine->lineBreakPos());
-    layoutState.setEndLineLogicalTop(previousLine->lineBoxBottom());
-
-    for (auto* line = lastLine; line; line = line->nextRootBox()) {
-        // Disconnect all line boxes from their render objects while preserving their connections to one another.
-        line->extractLine();
-    }
-    layoutState.setEndLine(lastLine);
-}
-
-bool LegacyLineLayout::matchedEndLine(LineLayoutState& layoutState, const InlineBidiResolver& resolver, const LegacyInlineIterator& endLineStart)
-{
-    if (resolver.position() == endLineStart)
-        return false;
-
-    // The first clean line doesn't match, but we can check a handful of following lines to try
-    // to match back up.
-    static const int numLines = 8; // The # of lines we're willing to match against.
-    LegacyRootInlineBox* originalEndLine = layoutState.endLine();
-    LegacyRootInlineBox* line = originalEndLine;
-    for (int i = 0; i < numLines && line; i++, line = line->nextRootBox()) {
-        if (line->lineBreakObj() == resolver.position().renderer() && line->lineBreakPos() == resolver.position().offset()) {
-            // We have a match.
-            if (line->lineBreakBidiStatus() != resolver.status())
-                return false; // ...but the bidi state doesn't match.
-            
-            bool matched = false;
-            LegacyRootInlineBox* result = line->nextRootBox();
-            layoutState.setEndLine(result);
-            if (result) {
-                layoutState.setEndLineLogicalTop(line->lineBoxBottom());
-                matched = true;
-            }
-
-            // Now delete the lines that we failed to sync.
-            deleteLineRange(layoutState, originalEndLine, result);
-            return matched;
-        }
-    }
-
-    return false;
-}
-
 void LegacyLineLayout::addOverflowFromInlineChildren()
 {
-    LayoutUnit endPadding = m_flow.hasNonVisibleOverflow() ? m_flow.paddingEnd() : 0_lu;
-    // FIXME: Need to find another way to do this, since scrollbars could show when we don't want them to.
-    if (!endPadding)
-        endPadding = m_flow.endPaddingWidthForCaret();
-    if (m_flow.hasNonVisibleOverflow() && !endPadding && m_flow.element() && m_flow.element()->isRootEditableElement() && style().isLeftToRightDirection())
-        endPadding = 1;
     for (auto* curr = firstRootBox(); curr; curr = curr->nextRootBox()) {
-        m_flow.addLayoutOverflow(curr->paddedLayoutOverflowRect(endPadding));
-        if (!m_flow.hasNonVisibleOverflow()) {
-            LayoutRect childVisualOverflowRect = curr->visualOverflowRect(curr->lineTop(), curr->lineBottom());
-            m_flow.addVisualOverflow(childVisualOverflowRect);
-        }
+        LayoutRect childVisualOverflowRect = curr->visualOverflowRect(curr->lineTop(), curr->lineBottom());
+        m_flow.addVisualOverflow(childVisualOverflowRect);
     }
 }
 
@@ -1001,18 +597,6 @@ size_t LegacyLineLayout::lineCount() const
     size_t count = 0;
     for (auto* box = firstRootBox(); box; box = box->nextRootBox())
         ++count;
-
-    return count;
-}
-
-size_t LegacyLineLayout::lineCountUntil(const LegacyRootInlineBox* stopRootInlineBox) const
-{
-    size_t count = 0;
-    for (auto* box = firstRootBox(); box; box = box->nextRootBox()) {
-        ++count;
-        if (box == stopRootInlineBox)
-            break;
-    }
 
     return count;
 }

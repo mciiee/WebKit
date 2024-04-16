@@ -444,7 +444,7 @@ void RenderBlock::styleDidChange(StyleDifference diff, const RenderStyle* oldSty
     if (oldStyle)
         adjustFragmentedFlowStateOnContainingBlockChangeIfNeeded(*oldStyle, style());
 
-    propagateStyleToAnonymousChildren(PropagateToBlockChildrenOnly);
+    propagateStyleToAnonymousChildren(StylePropagationType::BlockChildrenOnly);
 
     // It's possible for our border/padding to change, but for the overall logical width of the block to
     // end up being the same. We keep track of this change so in layoutBlock, we can know to set relayoutChildren=true.
@@ -1697,7 +1697,7 @@ void RenderBlock::getSelectionGapInfo(HighlightState state, bool& leftGap, bool&
 
 LayoutUnit RenderBlock::logicalLeftSelectionOffset(RenderBlock& rootBlock, LayoutUnit position, const LogicalSelectionOffsetCaches& cache)
 {
-    LayoutUnit logicalLeft = logicalLeftOffsetForLine(position, DoNotIndentText);
+    LayoutUnit logicalLeft = logicalLeftOffsetForLine(position);
     if (logicalLeft == logicalLeftOffsetForContent()) {
         if (&rootBlock != this) // The border can potentially be further extended by our containingBlock().
             return cache.containingBlockInfo(*this).logicalLeftSelectionOffset(rootBlock, position + logicalTop());
@@ -1721,7 +1721,7 @@ LayoutUnit RenderBlock::logicalLeftSelectionOffset(RenderBlock& rootBlock, Layou
 
 LayoutUnit RenderBlock::logicalRightSelectionOffset(RenderBlock& rootBlock, LayoutUnit position, const LogicalSelectionOffsetCaches& cache)
 {
-    LayoutUnit logicalRight = logicalRightOffsetForLine(position, DoNotIndentText);
+    LayoutUnit logicalRight = logicalRightOffsetForLine(position);
     if (logicalRight == logicalRightOffsetForContent()) {
         if (&rootBlock != this) // The border can potentially be further extended by our containingBlock().
             return cache.containingBlockInfo(*this).logicalRightSelectionOffset(rootBlock, position + logicalTop());
@@ -1908,12 +1908,9 @@ LayoutUnit RenderBlock::logicalRightOffsetForContent(RenderFragmentContainer* fr
     return logicalRightOffset - (logicalWidth() - (isHorizontalWritingMode() ? boxRect.maxX() : boxRect.maxY()));
 }
 
-LayoutUnit RenderBlock::adjustLogicalLeftOffsetForLine(LayoutUnit offsetFromFloats, bool applyTextIndent) const
+LayoutUnit RenderBlock::adjustLogicalLeftOffsetForLine(LayoutUnit offsetFromFloats) const
 {
     LayoutUnit left = offsetFromFloats;
-
-    if (applyTextIndent && style().isLeftToRightDirection())
-        left += textIndentOffset();
 
     if (style().lineAlign() == LineAlign::None)
         return left;
@@ -1948,13 +1945,10 @@ LayoutUnit RenderBlock::adjustLogicalLeftOffsetForLine(LayoutUnit offsetFromFloa
     return left;
 }
 
-LayoutUnit RenderBlock::adjustLogicalRightOffsetForLine(LayoutUnit offsetFromFloats, bool applyTextIndent) const
+LayoutUnit RenderBlock::adjustLogicalRightOffsetForLine(LayoutUnit offsetFromFloats) const
 {
     LayoutUnit right = offsetFromFloats;
-    
-    if (applyTextIndent && !style().isLeftToRightDirection())
-        right -= textIndentOffset();
-    
+
     if (style().lineAlign() == LineAlign::None)
         return right;
     
@@ -2107,7 +2101,7 @@ static inline bool isEditingBoundary(RenderElement* ancestor, RenderObject& chil
 // FIXME: This function should go on RenderObject as an instance method. Then
 // all cases in which positionForPoint recurs could call this instead to
 // prevent crossing editable boundaries. This would require many tests.
-VisiblePosition positionForPointRespectingEditingBoundaries(RenderBlock& parent, RenderBox& child, const LayoutPoint& pointInParentCoordinates)
+VisiblePosition positionForPointRespectingEditingBoundaries(RenderBlock& parent, RenderBox& child, const LayoutPoint& pointInParentCoordinates, HitTestSource source)
 {
     LayoutPoint childLocation = child.location();
     if (child.isInFlowPositioned())
@@ -2119,7 +2113,7 @@ VisiblePosition positionForPointRespectingEditingBoundaries(RenderBlock& parent,
     // If this is an anonymous renderer, we just recur normally
     Element* childElement= child.nonPseudoElement();
     if (!childElement)
-        return child.positionForPoint(pointInChildCoordinates, nullptr);
+        return child.positionForPoint(pointInChildCoordinates, source, nullptr);
 
     // Otherwise, first make sure that the editability of the parent and child agree.
     // If they don't agree, then we return a visible position just before or after the child
@@ -2129,7 +2123,7 @@ VisiblePosition positionForPointRespectingEditingBoundaries(RenderBlock& parent,
 
     // If we can't find an ancestor to check editability on, or editability is unchanged, we recur like normal
     if (isEditingBoundary(ancestor, child))
-        return child.positionForPoint(pointInChildCoordinates, nullptr);
+        return child.positionForPoint(pointInChildCoordinates, source, nullptr);
 
     // Otherwise return before or after the child, depending on if the click was to the logical left or logical right of the child
     LayoutUnit childMiddle = parent.logicalWidthForChild(child) / 2;
@@ -2139,21 +2133,22 @@ VisiblePosition positionForPointRespectingEditingBoundaries(RenderBlock& parent,
     return ancestor->createVisiblePosition(childElement->computeNodeIndex() + 1, Affinity::Upstream);
 }
 
-VisiblePosition RenderBlock::positionForPointWithInlineChildren(const LayoutPoint&, const RenderFragmentContainer*)
+VisiblePosition RenderBlock::positionForPointWithInlineChildren(const LayoutPoint&, HitTestSource, const RenderFragmentContainer*)
 {
     ASSERT_NOT_REACHED();
     return VisiblePosition();
 }
 
-static inline bool isChildHitTestCandidate(const RenderBox& box)
+static inline bool isChildHitTestCandidate(const RenderBox& box, HitTestSource source)
 {
-    return box.height() && box.style().usedVisibility() == Visibility::Visible && !box.isOutOfFlowPositioned() && !box.isRenderFragmentedFlow();
+    auto visibility = source == HitTestSource::Script ? box.style().visibility() : box.style().usedVisibility();
+    return box.height() && visibility == Visibility::Visible && !box.isOutOfFlowPositioned() && !box.isRenderFragmentedFlow();
 }
 
 // Valid candidates in a FragmentedFlow must be rendered by the fragment.
-static inline bool isChildHitTestCandidate(const RenderBox& box, const RenderFragmentContainer* fragment, const LayoutPoint& point)
+static inline bool isChildHitTestCandidate(const RenderBox& box, const RenderFragmentContainer* fragment, const LayoutPoint& point, HitTestSource source)
 {
-    if (!isChildHitTestCandidate(box))
+    if (!isChildHitTestCandidate(box, source))
         return false;
     if (!fragment)
         return true;
@@ -2165,10 +2160,10 @@ static inline bool isChildHitTestCandidate(const RenderBox& box, const RenderFra
     return block.fragmentAtBlockOffset(point.y()) == fragment;
 }
 
-VisiblePosition RenderBlock::positionForPoint(const LayoutPoint& point, const RenderFragmentContainer* fragment)
+VisiblePosition RenderBlock::positionForPoint(const LayoutPoint& point, HitTestSource source, const RenderFragmentContainer* fragment)
 {
     if (isRenderTable())
-        return RenderBox::positionForPoint(point, fragment);
+        return RenderBox::positionForPoint(point, source, fragment);
 
     if (isReplacedOrInlineBlock()) {
         // FIXME: This seems wrong when the object's writing-mode doesn't match the line's writing-mode.
@@ -2185,7 +2180,7 @@ VisiblePosition RenderBlock::positionForPoint(const LayoutPoint& point, const Re
             return createVisiblePosition(caretMaxOffset(), Affinity::Downstream);
     }
     if (isFlexibleBoxIncludingDeprecated() || isRenderGrid())
-        return RenderBox::positionForPoint(point, fragment);
+        return RenderBox::positionForPoint(point, source, fragment);
 
     LayoutPoint pointInContents = point;
     offsetForContents(pointInContents);
@@ -2194,36 +2189,36 @@ VisiblePosition RenderBlock::positionForPoint(const LayoutPoint& point, const Re
         pointInLogicalContents = pointInLogicalContents.transposedPoint();
 
     if (childrenInline())
-        return positionForPointWithInlineChildren(pointInLogicalContents, fragment);
+        return positionForPointWithInlineChildren(pointInLogicalContents, source, fragment);
 
     RenderBox* lastCandidateBox = lastChildBox();
 
     if (!fragment)
         fragment = fragmentAtBlockOffset(pointInLogicalContents.y());
 
-    while (lastCandidateBox && !isChildHitTestCandidate(*lastCandidateBox, fragment, pointInLogicalContents))
+    while (lastCandidateBox && !isChildHitTestCandidate(*lastCandidateBox, fragment, pointInLogicalContents, source))
         lastCandidateBox = lastCandidateBox->previousSiblingBox();
 
     bool blocksAreFlipped = style().isFlippedBlocksWritingMode();
     if (lastCandidateBox) {
         if (pointInLogicalContents.y() > logicalTopForChild(*lastCandidateBox)
             || (!blocksAreFlipped && pointInLogicalContents.y() == logicalTopForChild(*lastCandidateBox)))
-            return positionForPointRespectingEditingBoundaries(*this, *lastCandidateBox, pointInContents);
+            return positionForPointRespectingEditingBoundaries(*this, *lastCandidateBox, pointInContents, source);
 
         for (auto* childBox = firstChildBox(); childBox; childBox = childBox->nextSiblingBox()) {
-            if (!isChildHitTestCandidate(*childBox, fragment, pointInLogicalContents))
+            if (!isChildHitTestCandidate(*childBox, fragment, pointInLogicalContents, source))
                 continue;
             auto childLogicalBottom = logicalTopForChild(*childBox) + logicalHeightForChild(*childBox);
             if (auto* blockFlow = dynamicDowncast<RenderBlockFlow>(childBox))
                 childLogicalBottom = std::max(childLogicalBottom, blockFlow->lowestFloatLogicalBottom());
             // We hit child if our click is above the bottom of its padding box (like IE6/7 and FF3).
             if (pointInLogicalContents.y() < childLogicalBottom || (blocksAreFlipped && pointInLogicalContents.y() == childLogicalBottom))
-                return positionForPointRespectingEditingBoundaries(*this, *childBox, pointInContents);
+                return positionForPointRespectingEditingBoundaries(*this, *childBox, pointInContents, source);
         }
     }
 
     // We only get here if there are no hit test candidate children below the click.
-    return RenderBox::positionForPoint(point, fragment);
+    return RenderBox::positionForPoint(point, source, fragment);
 }
 
 void RenderBlock::offsetForContents(LayoutPoint& offset) const
@@ -3155,12 +3150,12 @@ TextRun RenderBlock::constructTextRun(const RenderText& text, unsigned offset, u
 
 TextRun RenderBlock::constructTextRun(const LChar* characters, unsigned length, const RenderStyle& style, ExpansionBehavior expansion)
 {
-    return constructTextRun(StringView(characters, length), style, expansion);
+    return constructTextRun(StringView { std::span { characters, length } }, style, expansion);
 }
 
 TextRun RenderBlock::constructTextRun(const UChar* characters, unsigned length, const RenderStyle& style, ExpansionBehavior expansion)
 {
-    return constructTextRun(StringView(characters, length), style, expansion);
+    return constructTextRun(StringView { std::span { characters, length } }, style, expansion);
 }
 
 #if ASSERT_ENABLED

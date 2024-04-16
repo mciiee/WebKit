@@ -416,8 +416,10 @@ class RenderCommandEncoder final : public CommandEncoder
     RenderCommandEncoder &setStencilRefVals(uint32_t frontRef, uint32_t backRef);
     RenderCommandEncoder &setStencilRefVal(uint32_t ref);
 
-    RenderCommandEncoder &setViewport(const MTLViewport &viewport);
-    RenderCommandEncoder &setScissorRect(const MTLScissorRect &rect);
+    RenderCommandEncoder &setViewport(const MTLViewport &viewport,
+                                      id<MTLRasterizationRateMap> map);
+    RenderCommandEncoder &setScissorRect(const MTLScissorRect &rect,
+                                         id<MTLRasterizationRateMap> map);
 
     RenderCommandEncoder &setBlendColor(float r, float g, float b, float a);
 
@@ -566,6 +568,8 @@ class RenderCommandEncoder final : public CommandEncoder
     RenderCommandEncoder &setDepthLoadAction(MTLLoadAction action, double clearValue);
     RenderCommandEncoder &setStencilLoadAction(MTLLoadAction action, uint32_t clearValue);
 
+    RenderCommandEncoder &setRasterizationRateMap(id<MTLRasterizationRateMap> map);
+
     void setLabel(NSString *label);
 
     void pushDebugGroup(NSString *label) override;
@@ -576,6 +580,8 @@ class RenderCommandEncoder final : public CommandEncoder
     bool hasPipelineState() const { return mPipelineStateSet; }
 
     uint64_t getSerial() const { return mSerial; }
+    id<MTLRasterizationRateMap> rasterizationRateMapForPass(id<MTLRasterizationRateMap> map,
+                                                            id<MTLTexture> colorTexture) const;
 
   private:
     // Override CommandEncoder

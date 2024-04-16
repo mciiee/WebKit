@@ -32,7 +32,6 @@
 #include "config.h"
 #include "RenderSVGModelObject.h"
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "RenderElementInlines.h"
 #include "RenderGeometryMap.h"
 #include "RenderLayer.h"
@@ -107,14 +106,14 @@ const RenderObject* RenderSVGModelObject::pushMappingToContainer(const RenderLay
     ASSERT(style().position() == PositionType::Static);
 
     bool ancestorSkipped;
-    RenderElement* container = this->container(ancestorToStopAt, ancestorSkipped);
+    CheckedPtr container = this->container(ancestorToStopAt, ancestorSkipped);
     if (!container)
         return nullptr;
 
     ASSERT_UNUSED(ancestorSkipped, !ancestorSkipped);
 
-    pushOntoGeometryMap(geometryMap, ancestorToStopAt, container, ancestorSkipped);
-    return container;
+    pushOntoGeometryMap(geometryMap, ancestorToStopAt, container.get(), ancestorSkipped);
+    return container.get();
 }
 
 LayoutRect RenderSVGModelObject::outlineBoundsForRepaint(const RenderLayerModelObject* repaintContainer, const RenderGeometryMap* geometryMap) const
@@ -293,5 +292,3 @@ void RenderSVGModelObject::paintSVGOutline(PaintInfo& paintInfo, const LayoutPoi
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

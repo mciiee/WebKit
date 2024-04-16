@@ -72,10 +72,6 @@
 typedef struct OpaqueCFHTTPCookieStorage*  CFHTTPCookieStorageRef;
 #endif
 
-#if USE(EXTENSIONKIT)
-OBJC_CLASS WKGrant;
-#endif
-
 namespace IPC {
 class FormDataReference;
 }
@@ -135,9 +131,10 @@ class Cache;
 enum class CacheOption : uint8_t;
 }
 
-class NetworkProcess : public AuxiliaryProcess, private DownloadManager::Client, public ThreadSafeRefCounted<NetworkProcess>
+class NetworkProcess : public AuxiliaryProcess, private DownloadManager::Client, public ThreadSafeRefCounted<NetworkProcess>, public CanMakeCheckedPtr<NetworkProcess>
 {
     WTF_MAKE_NONCOPYABLE(NetworkProcess);
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     using RegistrableDomain = WebCore::RegistrableDomain;
     using TopFrameDomain = WebCore::RegistrableDomain;
@@ -392,10 +389,6 @@ public:
     RTCDataChannelRemoteManagerProxy& rtcDataChannelProxy();
 #endif
 
-#if ENABLE(CFPREFS_DIRECT_MODE)
-    void notifyPreferencesChanged(const String& domain, const String& key, const std::optional<String>& encodedValue);
-#endif
-
     bool ftpEnabled() const { return m_ftpEnabled; }
     bool builtInNotificationsEnabled() const { return m_builtInNotificationsEnabled; }
 
@@ -428,8 +421,20 @@ public:
 
     void requestBackgroundFetchPermission(PAL::SessionID, const WebCore::ClientOrigin&, CompletionHandler<void(bool)>&&);
     void setInspectionForServiceWorkersAllowed(PAL::SessionID, bool);
+    void setStorageSiteValidationEnabled(PAL::SessionID, bool);
 
 private:
+    // CheckedPtr interface
+    uint32_t ptrCount() const final { return CanMakeCheckedPtr::ptrCount(); }
+    void incrementPtrCount() const final { CanMakeCheckedPtr::incrementPtrCount(); }
+    void decrementPtrCount() const final { CanMakeCheckedPtr::decrementPtrCount(); }
+#if CHECKED_POINTER_DEBUG
+    void registerCheckedPtr(const void* pointer) const final { CanMakeCheckedPtr::registerCheckedPtr(pointer); };
+    void copyCheckedPtr(const void* source, const void* destination) const final { CanMakeCheckedPtr::copyCheckedPtr(source, destination); }
+    void moveCheckedPtr(const void* source, const void* destination) const final { CanMakeCheckedPtr::moveCheckedPtr(source, destination); }
+    void unregisterCheckedPtr(const void* pointer) const final { CanMakeCheckedPtr::unregisterCheckedPtr(pointer); }
+#endif // CHECKED_POINTER_DEBUG
+
     void platformInitializeNetworkProcess(const NetworkProcessCreationParameters&);
 
     void didReceiveNetworkProcessMessage(IPC::Connection&, IPC::Decoder&);
@@ -523,11 +528,6 @@ private:
 
 #if USE(RUNNINGBOARD)
     void setIsHoldingLockedFiles(bool);
-#if USE(EXTENSIONKIT)
-    bool acquireLockedFileActivity();
-    void invalidateFileActivity();
-    bool hasAcquiredFileActivity() const;
-#endif
 #endif
     void stopRunLoopIfNecessary();
 
@@ -540,7 +540,7 @@ private:
     mutable String m_uiProcessBundleIdentifier;
     DownloadManager m_downloadManager;
 
-    using NetworkProcessSupplementMap = HashMap<ASCIILiteral, std::unique_ptr<NetworkProcessSupplement>, ASCIILiteralPtrHash>;
+    using NetworkProcessSupplementMap = HashMap<ASCIILiteral, std::unique_ptr<NetworkProcessSupplement>>;
     NetworkProcessSupplementMap m_supplements;
 
     HashSet<PAL::SessionID> m_sessionsControlledByAutomation;
@@ -564,9 +564,6 @@ private:
 
 #if USE(RUNNINGBOARD)
     WebSQLiteDatabaseTracker m_webSQLiteDatabaseTracker;
-#if USE(EXTENSIONKIT)
-    OSObjectPtr<dispatch_semaphore_t> m_holdingLockedFileSemaphore;
-#endif
     RefPtr<ProcessAssertion> m_holdingLockedFileAssertion;
 #endif
     

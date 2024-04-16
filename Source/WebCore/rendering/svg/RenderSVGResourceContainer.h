@@ -20,8 +20,6 @@
 
 #pragma once
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
-
 #include "RenderSVGHiddenContainer.h"
 
 namespace WebCore {
@@ -35,6 +33,9 @@ public:
 
     void idChanged();
     void repaintAllClients() const;
+
+    virtual void addReferencingCSSClient(const RenderElement&) { }
+    virtual void removeReferencingCSSClient(const RenderElement&) { }
 
 protected:
     RenderSVGResourceContainer(Type, SVGElement&, RenderStyle&&);
@@ -51,4 +52,3 @@ private:
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGResourceContainer, isRenderSVGResourceContainer())
 
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

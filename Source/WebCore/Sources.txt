@@ -534,9 +534,9 @@ accessibility/AXObjectCache.cpp
 accessibility/AXRemoteFrame.cpp
 accessibility/AXTextMarker.cpp
 accessibility/AXTextRun.cpp
-accessibility/AccessibilityARIAGrid.cpp
 accessibility/AccessibilityARIAGridCell.cpp
 accessibility/AccessibilityARIAGridRow.cpp
+accessibility/AccessibilityARIATable.cpp
 accessibility/AccessibilityAttachment.cpp
 accessibility/AccessibilityImageMapLink.cpp
 accessibility/AccessibilityLabel.cpp
@@ -644,6 +644,7 @@ bindings/js/JSDOMPromiseDeferred.cpp
 bindings/js/JSDOMQuadCustom.cpp
 bindings/js/JSDOMSetLike.cpp
 bindings/js/JSDOMWindowBase.cpp
+bindings/js/JSDOMWindowCustom.cpp
 bindings/js/JSDOMWindowProperties.cpp
 bindings/js/JSDOMWrapper.cpp
 bindings/js/JSDOMWrapperCache.cpp
@@ -680,7 +681,6 @@ bindings/js/JSIntersectionObserverCustom.cpp
 bindings/js/JSIntersectionObserverEntryCustom.cpp
 bindings/js/JSKeyframeEffectCustom.cpp
 bindings/js/JSLazyEventListener.cpp
-bindings/js/JSLocalDOMWindowCustom.cpp
 bindings/js/JSLocationCustom.cpp
 bindings/js/JSMediaSessionCustom.cpp
 bindings/js/JSMediaSourceCustom.cpp
@@ -708,8 +708,6 @@ bindings/js/JSPromiseRejectionEventCustom.cpp
 bindings/js/JSRTCRtpSFrameTransformCustom.cpp
 bindings/js/JSRangeCustom.cpp
 bindings/js/JSReadableStreamSourceCustom.cpp
-bindings/js/JSRemoteDOMWindowBase.cpp
-bindings/js/JSRemoteDOMWindowCustom.cpp
 bindings/js/JSReportBodyCustom.cpp
 bindings/js/JSResizeObserverCustom.cpp
 bindings/js/JSResizeObserverEntryCustom.cpp
@@ -725,6 +723,8 @@ bindings/js/JSTextCustom.cpp
 bindings/js/JSTextTrackCueCustom.cpp
 bindings/js/JSTrackCustom.cpp
 bindings/js/JSTreeWalkerCustom.cpp
+bindings/js/JSTrustedTypePolicyCustom.cpp
+bindings/js/JSTrustedTypePolicyFactoryCustom.cpp
 bindings/js/JSCSSStyleValueCustom.cpp
 bindings/js/JSCSSTransformComponentCustom.cpp
 bindings/js/JSUndoItemCustom.cpp
@@ -939,6 +939,7 @@ css/SVGCSSComputedStyleDeclaration.cpp
 css/SelectorChecker.cpp
 css/SelectorFilter.cpp
 css/ShorthandSerializer.cpp
+css/StyleAttributeMutationScope.cpp
 css/StyleColor.cpp
 css/StyleMedia.cpp
 css/StyleProperties.cpp
@@ -1929,7 +1930,7 @@ page/DeviceController.cpp
 page/DiagnosticLoggingKeys.cpp
 page/DisabledAdaptations.cpp
 page/DragController.cpp
-page/ElementTargeting.cpp
+page/ElementTargetingController.cpp
 page/EventHandler.cpp
 page/EventSource.cpp
 page/FocusController.cpp
@@ -2019,6 +2020,8 @@ page/UndoManager.cpp
 page/UserContentController.cpp
 page/UserContentProvider.cpp
 page/UserContentURLPattern.cpp
+page/UserScript.cpp
+page/UserStyleSheet.cpp
 page/VisitedLinkStore.cpp
 page/VisualViewport.cpp
 page/WheelEventDeltaFilter.cpp
@@ -2246,6 +2249,7 @@ platform/graphics/AlphaPremultiplication.cpp
 platform/graphics/AnimationFrameRate.cpp
 platform/graphics/BifurcatedGraphicsContext.cpp
 platform/graphics/BitmapImage.cpp
+platform/graphics/BitmapImageSource.cpp
 platform/graphics/ByteArrayPixelBuffer.cpp
 platform/graphics/CachedSubimage.cpp
 platform/graphics/CodecUtilities.cpp
@@ -2317,6 +2321,8 @@ platform/graphics/ImageBufferBackend.cpp
 platform/graphics/ImageBufferPipe.cpp
 platform/graphics/ImageDecoder.cpp
 platform/graphics/ImageFrame.cpp
+platform/graphics/ImageFrameAnimator.cpp
+platform/graphics/ImageFrameWorkQueue.cpp
 platform/graphics/ImagePaintingOptions.cpp
 platform/graphics/ImageSource.cpp
 platform/graphics/InbandGenericCue.cpp
@@ -2337,6 +2343,7 @@ platform/graphics/Model.cpp
 platform/graphics/NamedImageGeneratedImage.cpp
 platform/graphics/NullImageBufferBackend.cpp
 platform/graphics/NativeImage.cpp
+platform/graphics/NativeImageSource.cpp
 platform/graphics/Path.cpp
 platform/graphics/PathImpl.cpp
 platform/graphics/PathSegment.cpp
@@ -2933,7 +2940,6 @@ svg/SVGAltGlyphDefElement.cpp
 svg/SVGAltGlyphElement.cpp
 svg/SVGAltGlyphItemElement.cpp
 svg/SVGAngleValue.cpp
-svg/SVGAnimateColorElement.cpp
 svg/SVGAnimateElement.cpp
 svg/SVGAnimateElementBase.cpp
 svg/SVGAnimateMotionElement.cpp
@@ -3456,6 +3462,7 @@ JSDOMStringList.cpp
 JSDOMStringMap.cpp
 JSDOMTokenList.cpp
 JSDOMURL.cpp
+JSDOMWindow.cpp
 JSDataCue.cpp
 JSDataTransfer.cpp
 JSDataTransferItem.cpp
@@ -3727,6 +3734,7 @@ JSGeolocationCoordinates.cpp
 JSGeolocationPosition.cpp
 JSGeolocationPositionError.cpp
 JSGetAnimationsOptions.cpp
+JSGetHTMLOptions.cpp
 JSHTMLAllCollection.cpp
 JSHTMLAnchorElement.cpp
 JSHTMLAreaElement.cpp
@@ -3864,7 +3872,6 @@ JSKeyframeEffectOptions.cpp
 JSLandmark.cpp
 JSLandmarkType.cpp
 JSLatencyMode.cpp
-JSLocalDOMWindow.cpp
 JSLocation.cpp
 JSLongRange.cpp
 JSMathMLElement.cpp
@@ -4161,7 +4168,6 @@ JSReadableStreamDefaultController.cpp
 JSReadableStreamDefaultReader.cpp
 JSReadableStreamSink.cpp
 JSReadableStreamSource.cpp
-JSRemoteDOMWindow.cpp
 JSRemotePlayback.cpp
 JSRemotePlaybackAvailabilityCallback.cpp
 JSReport.cpp
@@ -4194,7 +4200,6 @@ JSSQLTransactionCallback.cpp
 JSSQLTransactionErrorCallback.cpp
 JSSVGAElement.cpp
 JSSVGAngle.cpp
-JSSVGAnimateColorElement.cpp
 JSSVGAnimateElement.cpp
 JSSVGAnimateMotionElement.cpp
 JSSVGAnimateTransformElement.cpp

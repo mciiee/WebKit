@@ -115,7 +115,7 @@ public:
 
     bool canHaveChildren() const override { return false; }
     bool canHaveGeneratedChildren() const override { return true; }
-    VisiblePosition positionForPoint(const LayoutPoint&, const RenderFragmentContainer*) override;
+    VisiblePosition positionForPoint(const LayoutPoint&, HitTestSource, const RenderFragmentContainer*) override;
 
     virtual Vector<LayoutRect> fragmentRectsForFlowContentRect(const LayoutRect&) const;
 
@@ -136,8 +136,8 @@ protected:
 private:
     ASCIILiteral renderName() const override { return "RenderFragmentContainer"_s; }
 
-    void insertedIntoTree(IsInternalMove) override;
-    void willBeRemovedFromTree(IsInternalMove) override;
+    void insertedIntoTree() override;
+    void willBeRemovedFromTree() override;
 
     virtual void installFragmentedFlow();
 

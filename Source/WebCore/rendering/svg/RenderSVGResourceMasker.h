@@ -25,8 +25,6 @@
 
 #include <wtf/HashMap.h>
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
-
 namespace WebCore {
 
 class GraphicsContext;
@@ -47,14 +45,20 @@ public:
     inline SVGUnitTypes::SVGUnitType maskUnits() const;
     inline SVGUnitTypes::SVGUnitType maskContentUnits() const;
 
+    void invalidateMask()
+    {
+        m_masker.clear();
+    }
+
+    void removeReferencingCSSClient(const RenderElement&) final;
+
 private:
     void element() const = delete;
 
     ASCIILiteral renderName() const final { return "RenderSVGResourceMasker"_s; }
+    HashMap<SingleThreadWeakRef<const RenderLayerModelObject>, RefPtr<ImageBuffer>> m_masker;
 };
 
 }
 
 SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGResourceMasker, isRenderSVGResourceMasker())
-
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

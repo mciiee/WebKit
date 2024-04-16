@@ -178,6 +178,7 @@
 #import <WebCore/HistoryController.h>
 #import <WebCore/HistoryItem.h>
 #import <WebCore/JSCSSStyleDeclaration.h>
+#import <WebCore/JSDOMWindow.h>
 #import <WebCore/JSDocument.h>
 #import <WebCore/JSElement.h>
 #import <WebCore/JSNodeList.h>
@@ -216,6 +217,7 @@
 #import <WebCore/ResourceLoadObserver.h>
 #import <WebCore/ResourceRequest.h>
 #import <WebCore/RuntimeApplicationChecks.h>
+#import <WebCore/SQLiteFileSystem.h>
 #import <WebCore/ScriptController.h>
 #import <WebCore/SecurityOrigin.h>
 #import <WebCore/SecurityPolicy.h>
@@ -729,17 +731,17 @@ WebCore::FindOptions coreOptions(WebFindOptions options)
 {
     WebCore::FindOptions findOptions;
     if (options & WebFindOptionsCaseInsensitive)
-        findOptions.add(WebCore::CaseInsensitive);
+        findOptions.add(WebCore::FindOption::CaseInsensitive);
     if (options & WebFindOptionsAtWordStarts)
-        findOptions.add(WebCore::AtWordStarts);
+        findOptions.add(WebCore::FindOption::AtWordStarts);
     if (options & WebFindOptionsTreatMedialCapitalAsWordStart)
-        findOptions.add(WebCore::TreatMedialCapitalAsWordStart);
+        findOptions.add(WebCore::FindOption::TreatMedialCapitalAsWordStart);
     if (options & WebFindOptionsBackwards)
-        findOptions.add(WebCore::Backwards);
+        findOptions.add(WebCore::FindOption::Backwards);
     if (options & WebFindOptionsWrapAround)
-        findOptions.add(WebCore::WrapAround);
+        findOptions.add(WebCore::FindOption::WrapAround);
     if (options & WebFindOptionsStartInSelection)
-        findOptions.add(WebCore::StartInSelection);
+        findOptions.add(WebCore::FindOption::StartInSelection);
     return findOptions;
 }
 
@@ -1304,7 +1306,7 @@ static RetainPtr<CFMutableSetRef>& allWebViewsSet()
     JSC::JSLockHolder lock(globalObject);
 
     // Make sure the context has a LocalDOMWindow global object, otherwise this context didn't originate from a WebView.
-    if (!globalObject->inherits<WebCore::JSLocalDOMWindow>())
+    if (!globalObject->inherits<WebCore::JSDOMWindow>())
         return;
 
     WebCore::reportException(globalObject, toJS(globalObject, exception));
@@ -1400,7 +1402,10 @@ static WebCore::ApplicationCacheStorage& webApplicationCacheStorage()
 {
     static std::once_flag onceFlag;
     std::call_once(onceFlag, [] {
-        FileSystem::deleteNonEmptyDirectory(applicationCachePath());
+        String applicationCacheDirectory = applicationCachePath();
+        auto applicationCacheDatabasePath = FileSystem::pathByAppendingComponent(applicationCacheDirectory, "ApplicationCache.db"_s);
+        WebCore::SQLiteFileSystem::deleteDatabaseFile(applicationCacheDatabasePath);
+        FileSystem::deleteNonEmptyDirectory(FileSystem::pathByAppendingComponent(applicationCacheDirectory, "ApplicationCache"_s));
     });
     static WebCore::ApplicationCacheStorage& storage = WebCore::ApplicationCacheStorage::create(emptyString(), emptyString()).leakRef();
 

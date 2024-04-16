@@ -35,6 +35,7 @@
 #include "FloatQuad.h"
 #include "LayoutRect.h"
 #include "Path.h"
+#include "RuntimeApplicationChecks.h"
 #include <wtf/Forward.h>
 #include <wtf/Function.h>
 #include <wtf/RefPtr.h>
@@ -106,12 +107,12 @@ public:
     virtual bool isAccessibilitySVGRoot() const { return false; }
     bool isAccessibilityTableInstance() const override { return false; }
     virtual bool isAccessibilityTableColumnInstance() const { return false; }
-    bool isAccessibilityARIAGridInstance() const override { return false; }
     bool isAccessibilityARIAGridRowInstance() const override { return false; }
     bool isAccessibilityARIAGridCellInstance() const override { return false; }
     virtual bool isAccessibilityLabelInstance() const { return false; }
     virtual bool isAccessibilityListBoxInstance() const { return false; }
-    bool isAXIsolatedObjectInstance() const override { return false; }
+    virtual bool isAccessibilityListBoxOptionInstance() const { return false; }
+    bool isAXIsolatedObjectInstance() const final { return false; }
 
     virtual bool isAttachmentElement() const { return false; }
     bool isLink() const override { return false; }
@@ -119,7 +120,6 @@ public:
     bool isContainedBySecureField() const;
     bool isNativeTextControl() const override { return false; }
     virtual bool isSearchField() const { return false; }
-    bool isListBoxOption() const override { return false; }
     bool isAttachment() const override { return false; }
     bool isMediaTimeline() const { return false; }
     bool isFileUploadButton() const final;
@@ -385,7 +385,7 @@ public:
     bool isARIAStaticText() const { return ariaRoleAttribute() == AccessibilityRole::StaticText; }
     String stringValue() const override { return { }; }
     bool dependsOnTextUnderElement() const;
-    String textUnderElement(AccessibilityTextUnderElementMode = AccessibilityTextUnderElementMode()) const override { return { }; }
+    String textUnderElement(TextUnderElementMode = TextUnderElementMode()) const override { return { }; }
     String text() const override { return { }; }
     unsigned textLength() const final;
 #if ENABLE(AX_THREAD_TEXT_APIS)
@@ -531,7 +531,8 @@ public:
 #endif
     bool isDetachedFromParent() override { return false; }
 
-    AccessibilityChildrenVector selectedChildren() override;
+    bool canHaveSelectedChildren() const;
+    std::optional<AccessibilityChildrenVector> selectedChildren() override;
     void setSelectedChildren(const AccessibilityChildrenVector&) override { }
     AccessibilityChildrenVector visibleChildren() override { return { }; }
     bool shouldFocusActiveDescendant() const;
@@ -814,6 +815,7 @@ protected:
     unsigned getLengthForTextRange() const;
 
 private:
+    ProcessID processID() const final { return presentingApplicationPID(); }
     bool hasAncestorFlag(AXAncestorFlag flag) const { return ancestorFlagsAreInitialized() && m_ancestorFlags.contains(flag); }
     std::optional<SimpleRange> rangeOfStringClosestToRangeInDirection(const SimpleRange&, AccessibilitySearchDirection, const Vector<String>&) const;
     std::optional<SimpleRange> selectionRange() const;

@@ -29,10 +29,12 @@
 #include "WebPreferencesDefaultValues.h"
 #include "WebURLSchemeHandler.h"
 #include <WebCore/ContentSecurityPolicy.h>
+#include <WebCore/FrameIdentifier.h>
 #include <WebCore/ShouldRelaxThirdPartyCookieBlocking.h>
 #include <wtf/Forward.h>
 #include <wtf/GetPtr.h>
 #include <wtf/HashMap.h>
+#include <wtf/Markable.h>
 #include <wtf/RobinHoodHashSet.h>
 #include <wtf/text/WTFString.h>
 
@@ -93,8 +95,13 @@ public:
     virtual ~PageConfiguration();
 
     Ref<PageConfiguration> copy() const;
+    void copyDataFrom(const PageConfiguration&);
 
     WebKit::BrowsingContextGroup& browsingContextGroup() const;
+    void setBrowsingContextGroup(RefPtr<WebKit::BrowsingContextGroup>&&);
+
+    RefPtr<WebKit::WebProcessProxy> openerProcess() const;
+    void setOpenerProcess(RefPtr<WebKit::WebProcessProxy>&&);
 
     WebKit::WebProcessPool& processPool() const;
     void setProcessPool(RefPtr<WebKit::WebProcessPool>&&);
@@ -232,8 +239,8 @@ public:
     const Vector<WTF::String>& corsDisablingPatterns() const { return m_data.corsDisablingPatterns; }
     void setCORSDisablingPatterns(Vector<WTF::String>&& patterns) { m_data.corsDisablingPatterns = WTFMove(patterns); }
 
-    const HashSet<WTF::String>& maskedURLSchemes() const { return m_data.maskedURLSchemes; }
-    void setMaskedURLSchemes(HashSet<WTF::String>&& schemes) { m_data.maskedURLSchemes = WTFMove(schemes); }
+    HashSet<WTF::String> maskedURLSchemes() const;
+    void setMaskedURLSchemes(HashSet<WTF::String>&& schemes) { m_data.maskedURLSchemesWasSet = true; m_data.maskedURLSchemes = WTFMove(schemes); }
 
     bool userScriptsShouldWaitUntilNotification() const { return m_data.userScriptsShouldWaitUntilNotification; }
     void setUserScriptsShouldWaitUntilNotification(bool value) { m_data.userScriptsShouldWaitUntilNotification = value; }
@@ -386,6 +393,12 @@ public:
     void setAllowTestOnlyIPC(bool enabled) { m_data.allowTestOnlyIPC = enabled; }
     bool allowTestOnlyIPC() const { return m_data.allowTestOnlyIPC; }
 
+    bool scrollToTextFragmentIndicatorEnabled () const { return m_data.scrollToTextFragmentIndicatorEnabled; }
+    void setScrollToTextFragmentIndicatorEnabled(bool enabled) { m_data.scrollToTextFragmentIndicatorEnabled = enabled; }
+
+    bool scrollToTextFragmentMarkingEnabled() const { return m_data.scrollToTextFragmentMarkingEnabled; }
+    void setScrollToTextFragmentMarkingEnabled(bool enabled) { m_data.scrollToTextFragmentMarkingEnabled = enabled; }
+
     void setPortsForUpgradingInsecureSchemeForTesting(uint16_t upgradeFromInsecurePort, uint16_t upgradeToSecurePort) { m_data.portsForUpgradingInsecureSchemeForTesting = { upgradeFromInsecurePort, upgradeToSecurePort }; }
     std::optional<std::pair<uint16_t, uint16_t>> portsForUpgradingInsecureSchemeForTesting() const { return m_data.portsForUpgradingInsecureSchemeForTesting; }
 
@@ -446,6 +459,7 @@ private:
 #endif
         RefPtr<WebKit::WebPageGroup> pageGroup;
         WeakPtr<WebKit::WebPageProxy> relatedPage;
+        RefPtr<WebKit::WebProcessProxy> openerProcess;
         WeakPtr<WebKit::WebPageProxy> pageToCloneSessionStorageFrom;
         WeakPtr<WebKit::WebPageProxy> alternateWebViewForNavigationGestures;
 
@@ -501,6 +515,7 @@ private:
         HashMap<WTF::String, Ref<WebKit::WebURLSchemeHandler>> urlSchemeHandlers;
         Vector<WTF::String> corsDisablingPatterns;
         HashSet<WTF::String> maskedURLSchemes;
+        bool maskedURLSchemesWasSet { false };
         bool userScriptsShouldWaitUntilNotification { true };
         bool crossOriginAccessControlCheckEnabled { true };
         WTF::String processDisplayName;
@@ -554,6 +569,8 @@ private:
         bool attachmentElementEnabled { false };
         bool attachmentWideLayoutEnabled { false };
         bool allowsInlinePredictions { false };
+        bool scrollToTextFragmentIndicatorEnabled { true };
+        bool scrollToTextFragmentMarkingEnabled { true };
 
         WebCore::ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking { WebCore::ShouldRelaxThirdPartyCookieBlocking::No };
         WTF::String attributedBundleIdentifier;

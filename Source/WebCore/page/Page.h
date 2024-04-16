@@ -110,6 +110,7 @@ class DiagnosticLoggingClient;
 class DragCaretController;
 class DragController;
 class EditorClient;
+class ElementTargetingController;
 class Element;
 class FocusController;
 class FormData;
@@ -165,6 +166,7 @@ class UserContentProvider;
 class UserContentURLPattern;
 class UserScript;
 class UserStyleSheet;
+class ValidatedFormListedElement;
 class ValidationMessageClient;
 class VisibleSelection;
 class VisitedLinkStore;
@@ -241,6 +243,7 @@ enum class RenderingUpdateStep : uint32_t {
     AccessibilityRegionUpdate       = 1 << 22,
 #endif
     RestoreScrollPositionAndViewState = 1 << 23,
+    AdjustVisibility                  = 1 << 24,
 };
 
 enum class LinkDecorationFilteringTrigger : uint8_t {
@@ -271,6 +274,7 @@ constexpr OptionSet<RenderingUpdateStep> updateRenderingSteps = {
     RenderingUpdateStep::CaretAnimation,
     RenderingUpdateStep::UpdateContentRelevancy,
     RenderingUpdateStep::PerformPendingViewTransitions,
+    RenderingUpdateStep::AdjustVisibility,
 };
 
 constexpr auto allRenderingUpdateSteps = updateRenderingSteps | OptionSet<RenderingUpdateStep> {
@@ -329,6 +333,7 @@ public:
     WEBCORE_EXPORT Ref<Frame> protectedMainFrame() const;
     WEBCORE_EXPORT void setMainFrame(Ref<Frame>&&);
     const URL& mainFrameURL() const { return m_mainFrameURL; }
+    SecurityOrigin& mainFrameOrigin() const;
     WEBCORE_EXPORT void setMainFrameURL(const URL&);
 
     bool openedByDOM() const;
@@ -393,6 +398,8 @@ public:
     WEBCORE_EXPORT void enableICECandidateFiltering();
     bool shouldEnableICECandidateFilteringByDefault() const { return m_shouldEnableICECandidateFilteringByDefault; }
 
+    WEBCORE_EXPORT CheckedRef<ElementTargetingController> checkedElementTargetingController();
+
     void didChangeMainDocument();
     void mainFrameDidChangeToNonInitialEmptyDocument();
 
@@ -400,6 +407,7 @@ public:
 
     ValidationMessageClient* validationMessageClient() const { return m_validationMessageClient.get(); }
     void updateValidationBubbleStateIfNeeded();
+    void scheduleValidationMessageUpdate(ValidatedFormListedElement&, HTMLElement&);
 
     WEBCORE_EXPORT ScrollingCoordinator* scrollingCoordinator();
     WEBCORE_EXPORT RefPtr<ScrollingCoordinator> protectedScrollingCoordinator();
@@ -1104,8 +1112,15 @@ public:
     void setIsInSwipeAnimation(bool inSwipeAnimation) { m_inSwipeAnimation = inSwipeAnimation; }
     bool isInSwipeAnimation() const { return m_inSwipeAnimation; }
 
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    WEBCORE_EXPORT void setDefaultSpatialTrackingLabel(const String&);
+    const String& defaultSpatialTrackingLabel() const { return m_defaultSpatialTrackingLabel; }
+#endif
+
 private:
     explicit Page(PageConfiguration&&);
+
+    void updateValidationMessages();
 
     struct Navigation {
         RegistrableDomain domain;
@@ -1176,6 +1191,7 @@ private:
 #if ENABLE(POINTER_LOCK)
     UniqueRef<PointerLockController> m_pointerLockController;
 #endif
+    UniqueRef<ElementTargetingController> m_elementTargetingController;
     RefPtr<ScrollingCoordinator> m_scrollingCoordinator;
 
     const RefPtr<Settings> m_settings;
@@ -1187,10 +1203,12 @@ private:
     UniqueRef<EditorClient> m_editorClient;
     Ref<Frame> m_mainFrame;
     URL m_mainFrameURL;
+    RefPtr<SecurityOrigin> m_mainFrameOrigin;
 
     RefPtr<PluginData> m_pluginData;
 
     std::unique_ptr<ValidationMessageClient> m_validationMessageClient;
+    Vector<std::pair<Ref<ValidatedFormListedElement>, WeakPtr<HTMLElement, WeakPtrImplWithEventTargetData>>> m_validationMessageUpdates;
     std::unique_ptr<DiagnosticLoggingClient> m_diagnosticLoggingClient;
     std::unique_ptr<PerformanceLoggingClient> m_performanceLoggingClient;
 
@@ -1487,6 +1505,10 @@ private:
 
 #if HAVE(APP_ACCENT_COLORS) && PLATFORM(MAC)
     bool m_appUsesCustomAccentColor { false };
+#endif
+
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    String m_defaultSpatialTrackingLabel;
 #endif
 };
 

@@ -596,6 +596,60 @@ TEST(WKWebExtensionAPIAction, SetIconSinglePath)
     [manager loadAndRun];
 }
 
+TEST(WKWebExtensionAPIAction, SetIconSinglePathRelative)
+{
+    auto *backgroundScript = Util::constructScript(@[
+        @"await browser.action.setIcon({ path: '../icons/toolbar-48.png' })",
+
+        @"browser.action.openPopup()"
+    ]);
+
+    auto *extraLargeToolbarIcon = Util::makePNGData(CGSizeMake(48, 48), @selector(yellowColor));
+
+    auto *resources = @{
+        @"background/index.html": @"<script type='module' src='script.js'></script>",
+        @"background/script.js": backgroundScript,
+        @"icons/toolbar-48.png": extraLargeToolbarIcon,
+        @"popup.html": @"Hello world!",
+    };
+
+    auto *manifest = @{
+        @"manifest_version": @3,
+
+        @"name": @"Action Test",
+        @"description": @"Action Test",
+        @"version": @"1",
+
+        @"background": @{
+            @"page": @"background/index.html",
+            @"type": @"module",
+            @"persistent": @NO,
+        },
+
+        @"action": @{
+            @"default_title": @"Test Action",
+            @"default_popup": @"popup.html",
+            @"default_icon": @{
+                @"16": @"icons/toolbar-16.png",
+                @"32": @"icons/toolbar-32.png",
+            },
+        },
+    };
+
+    auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:manifest resources:resources]);
+    auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    manager.get().internalDelegate.presentPopupForAction = ^(_WKWebExtensionAction *action) {
+        auto *icon = [action iconForSize:CGSizeMake(48, 48)];
+        EXPECT_NOT_NULL(icon);
+        EXPECT_TRUE(CGSizeEqualToSize(icon.size, CGSizeMake(48, 48)));
+
+        [manager done];
+    };
+
+    [manager loadAndRun];
+}
+
 TEST(WKWebExtensionAPIAction, SetIconMultipleSizes)
 {
     auto *backgroundScript = Util::constructScript(@[
@@ -617,6 +671,81 @@ TEST(WKWebExtensionAPIAction, SetIconMultipleSizes)
     };
 
     auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:actionPopupManifest resources:resources]);
+    auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    manager.get().internalDelegate.presentPopupForAction = ^(_WKWebExtensionAction *action) {
+        auto *icon48 = [action iconForSize:CGSizeMake(48, 48)];
+        auto *icon96 = [action iconForSize:CGSizeMake(96, 96)];
+        auto *icon128 = [action iconForSize:CGSizeMake(128, 128)];
+
+        EXPECT_NOT_NULL(icon48);
+#if USE(APPKIT)
+        EXPECT_TRUE(CGSizeEqualToSize(icon48.size, CGSizeMake(48, 48)));
+#else
+        EXPECT_TRUE(CGSizeEqualToSize(icon48.size, CGSizeMake(128, 128)));
+#endif
+
+        EXPECT_NOT_NULL(icon96);
+#if USE(APPKIT)
+        EXPECT_TRUE(CGSizeEqualToSize(icon96.size, CGSizeMake(96, 96)));
+#else
+        EXPECT_TRUE(CGSizeEqualToSize(icon96.size, CGSizeMake(128, 128)));
+#endif
+
+        EXPECT_NOT_NULL(icon128);
+        EXPECT_TRUE(CGSizeEqualToSize(icon128.size, CGSizeMake(128, 128)));
+
+        [manager done];
+    };
+
+    [manager loadAndRun];
+}
+
+TEST(WKWebExtensionAPIAction, SetIconMultipleSizesRelative)
+{
+    auto *backgroundScript = Util::constructScript(@[
+        @"await browser.action.setIcon({ path: { '48': '../icons/toolbar-48.png', '96': '../icons/toolbar-96.png', '128': '../icons/toolbar-128.png' } })",
+
+        @"browser.action.openPopup()"
+    ]);
+
+    auto *largeToolbarIcon = Util::makePNGData(CGSizeMake(48, 48), @selector(yellowColor));
+    auto *extraLargeToolbarIcon = Util::makePNGData(CGSizeMake(96, 96), @selector(greenColor));
+    auto *superExtraLargeToolbarIcon = Util::makePNGData(CGSizeMake(128, 128), @selector(purpleColor));
+
+    auto *resources = @{
+        @"background/index.html": @"<script type='module' src='script.js'></script>",
+        @"background/script.js": backgroundScript,
+        @"icons/toolbar-48.png": largeToolbarIcon,
+        @"icons/toolbar-96.png": extraLargeToolbarIcon,
+        @"icons/toolbar-128.png": superExtraLargeToolbarIcon,
+        @"popup.html": @"Hello world!",
+    };
+
+    auto *manifest = @{
+        @"manifest_version": @3,
+
+        @"name": @"Action Test",
+        @"description": @"Action Test",
+        @"version": @"1",
+
+        @"background": @{
+            @"page": @"background/index.html",
+            @"type": @"module",
+            @"persistent": @NO,
+        },
+
+        @"action": @{
+            @"default_title": @"Test Action",
+            @"default_popup": @"popup.html",
+            @"default_icon": @{
+                @"16": @"icons/toolbar-16.png",
+                @"32": @"icons/toolbar-32.png",
+            },
+        },
+    };
+
+    auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:manifest resources:resources]);
     auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
 
     manager.get().internalDelegate.presentPopupForAction = ^(_WKWebExtensionAction *action) {
@@ -1233,6 +1362,38 @@ TEST(WKWebExtensionAPIAction, ClickedEventAndPermissionsRequest)
     [manager loadAndRun];
 
     EXPECT_NS_EQUAL(manager.get().yieldMessage, @"Test Action");
+
+    [manager.get().context performActionForTab:manager.get().defaultTab];
+
+    [manager run];
+}
+
+TEST(WKWebExtensionAPIAction, SubframeNavigation)
+{
+    TestWebKitAPI::HTTPServer server({
+        { "/"_s, { { { "Content-Type"_s, "text/html"_s } }, "<script>browser.test.notifyPass()</script>"_s } },
+    }, TestWebKitAPI::HTTPServer::Protocol::Http);
+
+    auto *backgroundScript = Util::constructScript(@[
+        @"browser.test.yield('Test Popup Action')"
+    ]);
+
+    auto *resources = @{
+        @"background.js": backgroundScript,
+        @"popup.html": [NSString stringWithFormat:@"<iframe src='%@'></iframe>", server.requestWithLocalhost("/"_s).URL],
+    };
+
+    auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:actionPopupManifest resources:resources]);
+    auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    manager.get().internalDelegate.presentPopupForAction = ^(_WKWebExtensionAction *action) {
+        EXPECT_TRUE(action.presentsPopup);
+        EXPECT_NOT_NULL(action.popupWebView);
+    };
+
+    [manager loadAndRun];
+
+    EXPECT_NS_EQUAL(manager.get().yieldMessage, @"Test Popup Action");
 
     [manager.get().context performActionForTab:manager.get().defaultTab];
 

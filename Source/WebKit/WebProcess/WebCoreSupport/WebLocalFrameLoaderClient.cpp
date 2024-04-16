@@ -1589,6 +1589,8 @@ void WebLocalFrameLoaderClient::transitionToCommittedForNewPage()
     if (webPage->scrollPinningBehavior() != ScrollPinningBehavior::DoNotPin)
         view->setScrollPinningBehavior(webPage->scrollPinningBehavior());
 
+    webPage->scheduleFullEditorStateUpdate();
+
 #if USE(COORDINATED_GRAPHICS)
     if (shouldUseFixedLayout) {
         view->setDelegatedScrollingMode(shouldUseFixedLayout ? DelegatedScrollingMode::DelegatedToNativeScrollView : DelegatedScrollingMode::NotDelegated);
@@ -1939,11 +1941,6 @@ void WebLocalFrameLoaderClient::getLoadDecisionForIcons(const Vector<std::pair<W
 
     for (auto& icon : icons)
         webPage->send(Messages::WebPageProxy::GetLoadDecisionForIcon(icon.first, CallbackID::fromInteger(icon.second)));
-}
-
-void WebLocalFrameLoaderClient::broadcastFrameRemovalToOtherProcesses()
-{
-    WebFrameLoaderClient::broadcastFrameRemovalToOtherProcesses();
 }
 
 void WebLocalFrameLoaderClient::broadcastMainFrameURLChangeToOtherProcesses(const URL& url)

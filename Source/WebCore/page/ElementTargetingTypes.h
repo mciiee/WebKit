@@ -28,6 +28,7 @@
 #include "ElementIdentifier.h"
 #include "FloatPoint.h"
 #include "FloatRect.h"
+#include "FrameIdentifier.h"
 #include "RectEdges.h"
 #include "RenderStyleConstants.h"
 #include "ScriptExecutionContextIdentifier.h"
@@ -38,6 +39,7 @@ namespace WebCore {
 
 struct TargetedElementRequest {
     FloatPoint pointInRootView;
+    bool canIncludeNearbyElements { true };
 };
 
 struct TargetedElementInfo {
@@ -47,7 +49,11 @@ struct TargetedElementInfo {
     String renderedText;
     Vector<String> selectors;
     FloatRect boundsInRootView;
+    FloatRect boundsInClientCoordinates;
     PositionType positionType { PositionType::Static };
+    Vector<FrameIdentifier> childFrameIdentifiers;
+    bool isUnderPoint { true };
+    bool isPseudoElement { false };
 };
 
 } // namespace WebCore

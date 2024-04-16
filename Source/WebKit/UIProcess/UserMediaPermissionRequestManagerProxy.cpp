@@ -48,6 +48,7 @@
 #include <WebCore/UserMediaRequest.h>
 #include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/Scope.h>
+#include <wtf/StdLibExtras.h>
 #include <wtf/WeakHashSet.h>
 
 #if ENABLE(GPU_PROCESS)
@@ -344,8 +345,10 @@ void UserMediaPermissionRequestManagerProxy::resetAccess(std::optional<FrameIden
     ALWAYS_LOG(LOGIDENTIFIER, frameID ? frameID->object().toUInt64() : 0);
 
     if (RefPtr currentUserMediaRequest = m_currentUserMediaRequest; currentUserMediaRequest && (!frameID || m_currentUserMediaRequest->frameID() == *frameID)) {
-        currentUserMediaRequest->invalidate();
-        m_currentUserMediaRequest = nullptr;
+        // Avoid starting pending requests after denying current request.
+        auto pendingUserMediaRequests = std::exchange(m_pendingUserMediaRequests, { });
+        currentUserMediaRequest->deny(UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::OtherFailure);
+        m_pendingUserMediaRequests = std::exchange(pendingUserMediaRequests, { });
     }
 
     if (frameID) {
@@ -560,8 +563,8 @@ String UserMediaPermissionRequestManagerProxy::ephemeralDeviceHashSaltForFrame(W
     static constexpr unsigned hashSaltSize { 48 };
     static constexpr unsigned randomDataSize { hashSaltSize / 16 };
 
-    uint64_t randomData[randomDataSize];
-    cryptographicallyRandomValues(reinterpret_cast<unsigned char*>(randomData), sizeof(randomData));
+    std::array<uint64_t, randomDataSize> randomData;
+    cryptographicallyRandomValues(asWritableBytes(std::span<uint64_t> { randomData }));
 
     StringBuilder builder;
     builder.reserveCapacity(hashSaltSize);

@@ -42,10 +42,9 @@ namespace WebCore {
 
 WTF_MAKE_ISO_ALLOCATED_IMPL(LegacyRootInlineBox);
 
-struct SameSizeAsLegacyRootInlineBox : LegacyInlineFlowBox, CanMakeWeakPtr<LegacyRootInlineBox>, CanMakeCheckedPtr {
-    unsigned lineBreakPos;
-    SingleThreadWeakPtr<RenderObject> lineBreakObj;
-    void* lineBreakContext;
+struct SameSizeAsLegacyRootInlineBox : LegacyInlineFlowBox, CanMakeWeakPtr<LegacyRootInlineBox>, CanMakeCheckedPtr<SameSizeAsLegacyRootInlineBox> {
+    WTF_MAKE_STRUCT_FAST_ALLOCATED;
+
     int layoutUnits[4];
 };
 
@@ -82,17 +81,6 @@ void LegacyRootInlineBox::adjustPosition(float dx, float dy)
     m_lineBottom += blockDirectionDelta;
     m_lineBoxTop += blockDirectionDelta;
     m_lineBoxBottom += blockDirectionDelta;
-}
-
-void LegacyRootInlineBox::childRemoved(LegacyInlineBox* box)
-{
-    if (&box->renderer() == m_lineBreakObj)
-        setLineBreakInfo(nullptr, 0, BidiStatus());
-
-    for (auto* prev = prevRootBox(); prev && prev->lineBreakObj() == &box->renderer(); prev = prev->prevRootBox()) {
-        prev->setLineBreakInfo(nullptr, 0, BidiStatus());
-        prev->markDirty();
-    }
 }
 
 RenderObject::HighlightState LegacyRootInlineBox::selectionState() const
@@ -172,21 +160,6 @@ RenderBlockFlow& LegacyRootInlineBox::blockFlow() const
     return downcast<RenderBlockFlow>(renderer());
 }
 
-BidiStatus LegacyRootInlineBox::lineBreakBidiStatus() const
-{ 
-    return { static_cast<UCharDirection>(m_lineBreakBidiStatusEor), static_cast<UCharDirection>(m_lineBreakBidiStatusLastStrong), static_cast<UCharDirection>(m_lineBreakBidiStatusLast), m_lineBreakContext.copyRef() };
-}
-
-void LegacyRootInlineBox::setLineBreakInfo(RenderObject* object, unsigned breakPosition, const BidiStatus& status)
-{
-    m_lineBreakObj = object;
-    m_lineBreakPos = breakPosition;
-    m_lineBreakBidiStatusEor = status.eor;
-    m_lineBreakBidiStatusLastStrong = status.lastStrong;
-    m_lineBreakBidiStatusLast = status.last;
-    m_lineBreakContext = status.context;
-}
-
 void LegacyRootInlineBox::removeLineBoxFromRenderObject()
 {
     // Null if we are destroying LegacyLineLayout.
@@ -204,30 +177,9 @@ void LegacyRootInlineBox::attachLineBoxToRenderObject()
     blockFlow().legacyLineLayout()->lineBoxes().attachLineBox(this);
 }
 
-LayoutRect LegacyRootInlineBox::paddedLayoutOverflowRect(LayoutUnit endPadding) const
-{
-    LayoutRect lineLayoutOverflow = layoutOverflowRect(lineTop(), lineBottom());
-    if (!endPadding)
-        return lineLayoutOverflow;
-    
-    if (isHorizontal()) {
-        if (isLeftToRightDirection())
-            lineLayoutOverflow.shiftMaxXEdgeTo(std::max(lineLayoutOverflow.maxX(), LayoutUnit(logicalRight() + endPadding)));
-        else
-            lineLayoutOverflow.shiftXEdgeTo(std::min(lineLayoutOverflow.x(), LayoutUnit(logicalLeft() - endPadding)));
-    } else {
-        if (isLeftToRightDirection())
-            lineLayoutOverflow.shiftMaxYEdgeTo(std::max(lineLayoutOverflow.maxY(), LayoutUnit(logicalRight() + endPadding)));
-        else
-            lineLayoutOverflow.shiftYEdgeTo(std::min(lineLayoutOverflow.y(), LayoutUnit(logicalLeft() - endPadding)));
-    }
-    
-    return lineLayoutOverflow;
-}
-
 LayoutUnit LegacyRootInlineBox::lineBoxWidth() const
 {
-    return blockFlow().availableLogicalWidthForLine(lineBoxTop(), isFirstLine() ? IndentText : DoNotIndentText, lineBoxHeight());
+    return blockFlow().availableLogicalWidthForLine(lineBoxTop(), lineBoxHeight());
 }
 
 #if ENABLE(TREE_DEBUGGING)

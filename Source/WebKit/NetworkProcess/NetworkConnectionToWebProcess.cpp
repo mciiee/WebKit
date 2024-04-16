@@ -110,6 +110,10 @@
 #include "IPCTesterMessages.h"
 #endif
 
+#if ENABLE(CONTENT_FILTERING)
+#include <WebCore/MockContentFilterSettings.h>
+#endif
+
 #if HAVE(OS_SIGNPOST)
 #include <wtf/SystemTracing.h>
 #endif
@@ -1314,7 +1318,7 @@ WebSharedWorkerServerConnection* NetworkConnectionToWebProcess::sharedWorkerConn
 void NetworkConnectionToWebProcess::unregisterSWConnection()
 {
     if (m_swConnection)
-        m_swConnection->server().removeConnection(m_swConnection->identifier());
+        m_swConnection->protectedServer()->removeConnection(m_swConnection->identifier());
 }
 
 void NetworkConnectionToWebProcess::establishSWServerConnection()
@@ -1510,11 +1514,6 @@ void NetworkConnectionToWebProcess::logOnBehalfOfWebContent(std::span<const uint
     os_log_with_type(osLogPointer, static_cast<os_log_type_t>(logType), "WebContent[%d]: %{public}s", pid, logData);
 }
 #endif
-
-void NetworkConnectionToWebProcess::addAllowedFirstPartyForCookies(const RegistrableDomain& firstPartyForCookies)
-{
-    protectedConnection()->send(Messages::NetworkProcessConnection::AddAllowedFirstPartyForCookies(firstPartyForCookies), 0);
-}
 
 void NetworkConnectionToWebProcess::useRedirectionForCurrentNavigation(WebCore::ResourceLoaderIdentifier identifier, WebCore::ResourceResponse&& response)
 {

@@ -29,6 +29,8 @@
 #include "Element.h"
 #include "FontCascadeDescription.h"
 #include "GraphicsTypes.h"
+#include "GridPositionsResolver.h"
+#include "HitTestRequest.h"
 #include "ImageOrientation.h"
 #include "RenderStyle.h"
 #include "ScrollTypes.h"
@@ -242,6 +244,7 @@ inline bool RenderStyle::gridMasonryColumns() const { return m_nonInheritedData-
 inline bool RenderStyle::gridMasonryRows() const { return m_nonInheritedData->rareData->grid->masonryRows(); }
 inline const GridTrackList& RenderStyle::gridRowList() const { return m_nonInheritedData->rareData->grid->rows(); }
 inline const Vector<GridTrackSize>& RenderStyle::gridRowTrackSizes() const { return m_nonInheritedData->rareData->grid->gridRowTrackSizes(); }
+inline const Vector<GridTrackSize>& RenderStyle::gridTrackSizes(GridTrackSizingDirection direction) const { return direction == GridTrackSizingDirection::ForRows ? m_nonInheritedData->rareData->grid->gridRowTrackSizes() : m_nonInheritedData->rareData->grid->gridColumnTrackSizes(); }
 inline bool RenderStyle::gridSubgridColumns() const { return m_nonInheritedData->rareData->grid->subgridColumns(); }
 inline bool RenderStyle::gridSubgridRows() const { return m_nonInheritedData->rareData->grid->subgridRows(); }
 inline OptionSet<HangingPunctuation> RenderStyle::hangingPunctuation() const { return OptionSet<HangingPunctuation>::fromRaw(m_rareInheritedData->hangingPunctuation); }
@@ -1021,6 +1024,11 @@ inline bool isNonVisibleOverflow(Overflow overflow)
 inline bool pseudoElementRendererIsNeeded(const RenderStyle* style)
 {
     return style && style->display() != DisplayType::None && style->contentData();
+}
+
+inline bool isVisibleToHitTesting(const RenderStyle& style, const HitTestRequest& request)
+{
+    return (request.userTriggered() ? style.usedVisibility() : style.visibility()) == Visibility::Visible;
 }
 
 } // namespace WebCore

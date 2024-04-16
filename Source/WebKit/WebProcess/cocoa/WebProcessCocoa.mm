@@ -115,17 +115,20 @@
 #import <pal/spi/cocoa/pthreadSPI.h>
 #import <pal/spi/mac/NSApplicationSPI.h>
 #import <stdio.h>
+#import <wtf/BlockPtr.h>
 #import <wtf/FileSystem.h>
 #import <wtf/Language.h>
 #import <wtf/LogInitialization.h>
 #import <wtf/MemoryPressureHandler.h>
 #import <wtf/ProcessPrivilege.h>
 #import <wtf/SoftLinking.h>
+#import <wtf/cocoa/Entitlements.h>
 #import <wtf/cocoa/NSURLExtras.h>
 #import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
 #import <wtf/cocoa/TypeCastsCocoa.h>
 #import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/spi/cocoa/OSLogSPI.h>
+#import <wtf/spi/darwin/SandboxSPI.h>
 
 #if ENABLE(REMOTE_INSPECTOR)
 #import <JavaScriptCore/RemoteInspector.h>
@@ -184,12 +187,6 @@
 #import <pal/cocoa/AVFoundationSoftLink.h>
 #import <pal/cocoa/DataDetectorsCoreSoftLink.h>
 #import <pal/cocoa/MediaToolboxSoftLink.h>
-
-#if HAVE(CATALYST_USER_INTERFACE_IDIOM_AND_SCALE_FACTOR)
-// FIXME: This is only for binary compatibility with versions of UIKit in macOS 11 that are missing the change in <rdar://problem/68524148>.
-SOFT_LINK_FRAMEWORK(UIKit)
-SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE(WebKit, UIKit, _UIApplicationCatalystRequestViewServiceIdiomAndScaleFactor, void, (UIUserInterfaceIdiom idiom, CGFloat scaleFactor), (idiom, scaleFactor))
-#endif
 
 #define RELEASE_LOG_SESSION_ID (m_sessionID ? m_sessionID->toUInt64() : 0)
 #define WEBPROCESS_RELEASE_LOG(channel, fmt, ...) RELEASE_LOG(channel, "%p - [sessionID=%" PRIu64 "] WebProcess::" fmt, this, RELEASE_LOG_SESSION_ID, ##__VA_ARGS__)
@@ -348,12 +345,10 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& para
     applyProcessCreationParameters(parameters.auxiliaryProcessParameters);
 
     setQOS(parameters.latencyQOS, parameters.throughputQOS);
-    
+
 #if HAVE(CATALYST_USER_INTERFACE_IDIOM_AND_SCALE_FACTOR)
-    if (canLoad_UIKit__UIApplicationCatalystRequestViewServiceIdiomAndScaleFactor()) {
-        auto [overrideUserInterfaceIdiom, overrideScaleFactor] = parameters.overrideUserInterfaceIdiomAndScale;
-        softLink_UIKit__UIApplicationCatalystRequestViewServiceIdiomAndScaleFactor(static_cast<UIUserInterfaceIdiom>(overrideUserInterfaceIdiom), overrideScaleFactor);
-    }
+    auto [overrideUserInterfaceIdiom, overrideScaleFactor] = parameters.overrideUserInterfaceIdiomAndScale;
+    _UIApplicationCatalystRequestViewServiceIdiomAndScaleFactor(static_cast<UIUserInterfaceIdiom>(overrideUserInterfaceIdiom), overrideScaleFactor);
 #endif
 
     populateMobileGestaltCache(WTFMove(parameters.mobileGestaltExtensionHandle));
@@ -575,6 +570,17 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& para
 #endif
 
     disableURLSchemeCheckInDataDetectors();
+
+#if ENABLE(QUICKLOOK_SANDBOX_RESTRICTIONS)
+    if (auto auditToken = parentProcessConnection()->getAuditToken()) {
+        bool parentCanSetStateFlags = WTF::hasEntitlementValueInArray(auditToken.value(), "com.apple.private.security.enable-state-flags"_s, "EnableQuickLookSandboxResources"_s);
+        if (parentCanSetStateFlags) {
+            auto auditToken = auditTokenForSelf();
+            bool status = sandbox_enable_state_flag("ParentProcessCanEnableQuickLookStateFlag", auditToken.value());
+            WEBPROCESS_RELEASE_LOG(Sandbox, "Enabling ParentProcessCanEnableQuickLookStateFlag state flag, status = %d", status);
+        }
+    }
+#endif
 
 #if HAVE(VIDEO_RESTRICTED_DECODING) && PLATFORM(MAC) && !ENABLE(TRUSTD_BLOCKING_IN_WEBCONTENT)
     if (codeCheckSemaphore)
@@ -1388,11 +1394,6 @@ void WebProcess::handlePreferenceChange(const String& domain, const String& key,
     AuxiliaryProcess::handlePreferenceChange(domain, key, value);
 }
 
-void WebProcess::notifyPreferencesChanged(const String& domain, const String& key, const std::optional<String>& encodedValue)
-{
-    preferenceDidUpdate(domain, key, encodedValue);
-}
-
 void WebProcess::accessibilitySettingsDidChange()
 {
     for (auto& page : m_pageMap.values())
@@ -1527,15 +1528,19 @@ void WebProcess::systemDidWake()
 #if PLATFORM(MAC)
 void WebProcess::openDirectoryCacheInvalidated(SandboxExtension::Handle&& handle, SandboxExtension::Handle&& machBootstrapHandle)
 {
-    auto bootstrapExtension = SandboxExtension::create(WTFMove(machBootstrapHandle));
+    auto cacheInvalidationHandler = [handle = WTFMove(handle), machBootstrapHandle = WTFMove(machBootstrapHandle)] () mutable {
+        auto bootstrapExtension = SandboxExtension::create(WTFMove(machBootstrapHandle));
 
-    if (bootstrapExtension)
-        bootstrapExtension->consume();
-    
-    AuxiliaryProcess::openDirectoryCacheInvalidated(WTFMove(handle));
-    
-    if (bootstrapExtension)
-        bootstrapExtension->revoke();
+        if (bootstrapExtension)
+            bootstrapExtension->consume();
+
+        AuxiliaryProcess::openDirectoryCacheInvalidated(WTFMove(handle));
+
+        if (bootstrapExtension)
+            bootstrapExtension->revoke();
+    };
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), makeBlockPtr(WTFMove(cacheInvalidationHandler)).get());
 }
 #endif
 

@@ -389,13 +389,13 @@ inline FloatRect clipPathReferenceBox(const RenderElement& renderer, CSSBoxType 
 inline bool isPointInCSSClippingArea(const RenderElement& renderer, const FloatPoint& point)
 {
     RefPtr clipPathOperation = renderer.style().clipPath();
-    if (auto* clipPath = dynamicDowncast<ShapePathOperation>(clipPathOperation.get())) {
+    if (RefPtr clipPath = dynamicDowncast<ShapePathOperation>(clipPathOperation.get())) {
         FloatRect referenceBox = clipPathReferenceBox(renderer, clipPath->referenceBox());
         if (!referenceBox.contains(point))
             return false;
         return clipPath->pathForReferenceRect(referenceBox).contains(point, clipPath->windRule());
     }
-    if (auto* clipPath = dynamicDowncast<BoxPathOperation>(clipPathOperation.get())) {
+    if (RefPtr clipPath = dynamicDowncast<BoxPathOperation>(clipPathOperation.get())) {
         FloatRect referenceBox = clipPathReferenceBox(renderer, clipPath->referenceBox());
         if (!referenceBox.contains(point))
             return false;
@@ -408,7 +408,7 @@ inline bool isPointInCSSClippingArea(const RenderElement& renderer, const FloatP
 void SVGRenderSupport::clipContextToCSSClippingArea(GraphicsContext& context, const RenderElement& renderer)
 {
     RefPtr clipPathOperation = renderer.style().clipPath();
-    if (auto* clipPath = dynamicDowncast<ShapePathOperation>(clipPathOperation.get())) {
+    if (RefPtr clipPath = dynamicDowncast<ShapePathOperation>(clipPathOperation.get())) {
         auto localToParentTransform = renderer.localToParentTransform();
 
         auto referenceBox = clipPathReferenceBox(renderer, clipPath->referenceBox());
@@ -419,7 +419,7 @@ void SVGRenderSupport::clipContextToCSSClippingArea(GraphicsContext& context, co
 
         context.clipPath(path, clipPath->windRule());
     }
-    if (auto* clipPath = dynamicDowncast<BoxPathOperation>(clipPathOperation.get())) {
+    if (RefPtr clipPath = dynamicDowncast<BoxPathOperation>(clipPathOperation.get())) {
         FloatRect referenceBox = clipPathReferenceBox(renderer, clipPath->referenceBox());
         context.clipPath(clipPath->pathForReferenceRect(FloatRoundedRect { referenceBox }));
     }
@@ -427,9 +427,7 @@ void SVGRenderSupport::clipContextToCSSClippingArea(GraphicsContext& context, co
 
 bool SVGRenderSupport::pointInClippingArea(const RenderElement& renderer, const FloatPoint& point)
 {
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     RELEASE_ASSERT(!renderer.document().settings().layerBasedSVGEngineEnabled());
-#endif
 
     RefPtr clipPathOperation = renderer.style().clipPath();
     if (is<ShapePathOperation>(clipPathOperation) || is<BoxPathOperation>(clipPathOperation))
@@ -474,12 +472,10 @@ void SVGRenderSupport::applyStrokeStyleToContext(GraphicsContext& context, const
             ASSERT(renderer.isRenderOrLegacyRenderSVGShape());
             // FIXME: A value of zero is valid. Need to differentiate this case from being unspecified.
             if (float pathLength = geometryElement->pathLength()) {
-                if (auto* shape = dynamicDowncast<LegacyRenderSVGShape>(renderer))
+                if (CheckedPtr shape = dynamicDowncast<LegacyRenderSVGShape>(renderer))
                     scaleFactor = shape->getTotalLength() / pathLength;
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
-                else if (auto* shape = dynamicDowncast<RenderSVGShape>(renderer))
+                else if (CheckedPtr shape = dynamicDowncast<RenderSVGShape>(renderer))
                     scaleFactor = shape->getTotalLength() / pathLength;
-#endif
             }
         }
         
@@ -601,16 +597,11 @@ FloatRect SVGRenderSupport::calculateApproximateStrokeBoundingBox(const RenderEl
         return calculateApproximateScalingStrokeBoundingBox(renderer, renderer.objectBoundingBox());
     };
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (auto* shape = dynamicDowncast<LegacyRenderSVGShape>(renderer))
         return shape->adjustStrokeBoundingBoxForMarkersAndZeroLengthLinecaps(RepaintRectCalculation::Fast, calculate(*shape));
 
     const auto& shape = downcast<RenderSVGShape>(renderer);
     return shape.adjustStrokeBoundingBoxForZeroLengthLinecaps(RepaintRectCalculation::Fast, calculate(shape));
-#else
-    const auto& shape = downcast<LegacyRenderSVGShape>(renderer);
-    return shape.adjustStrokeBoundingBoxForMarkersAndZeroLengthLinecaps(RepaintRectCalculation::Fast, calculate(shape));
-#endif
 }
 
 }

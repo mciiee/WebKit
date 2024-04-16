@@ -210,7 +210,9 @@ static CACornerMask convertToCACornerMask(OptionSet<InteractionRegion::CornerMas
 
 void updateLayersForInteractionRegions(RemoteLayerTreeNode& node)
 {
-    if (node.eventRegion().interactionRegions().isEmpty()) {
+    ASSERT(node.uiView());
+
+    if (node.eventRegion().interactionRegions().isEmpty() || !node.uiView()) {
         node.removeInteractionRegionsContainer();
         return;
     }
@@ -314,7 +316,10 @@ void updateLayersForInteractionRegions(RemoteLayerTreeNode& node)
         if (applyBackgroundColorForDebugging)
             applyBackgroundColorForDebuggingToLayer(regionLayer.get(), region);
 
-        if ([container.sublayers objectAtIndex:insertionPoint] != regionLayer) {
+        // Since we insert new layers as we go, insertionPoint is always <= container.sublayers.count.
+        ASSERT(insertionPoint <= container.sublayers.count);
+        bool shouldAppendLayer = insertionPoint == container.sublayers.count;
+        if (shouldAppendLayer || [container.sublayers objectAtIndex:insertionPoint] != regionLayer) {
             [regionLayer removeFromSuperlayer];
             [container insertSublayer:regionLayer.get() atIndex:insertionPoint];
         }

@@ -198,7 +198,7 @@ public:
     HTMLFastPathParser(CharacterSpan source, Document& document, ContainerNode& destinationParent)
         : m_document(document)
         , m_destinationParent(destinationParent)
-        , m_parsingBuffer(source.data(), source.size())
+        , m_parsingBuffer(source)
     {
     }
 
@@ -492,7 +492,7 @@ private:
         unsigned length = m_parsingBuffer.position() - start;
         if (UNLIKELY(length >= Text::defaultLengthLimit))
             return didFail(HTMLFastPathResult::FailedBigText, String());
-        return length ? String(start, length) : String();
+        return length ? String({ start, length }) : String();
     }
 
     // Slow-path of `scanText()`, which supports escape sequences by copying to a

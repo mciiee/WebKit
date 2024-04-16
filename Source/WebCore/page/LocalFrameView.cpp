@@ -607,7 +607,6 @@ void LocalFrameView::applyOverflowToViewport(const RenderElement& renderer, Scro
     Overflow overflowX = renderer.style().overflowX();
     Overflow overflowY = renderer.style().overflowY();
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (CheckedPtr renderSVGRoot = dynamicDowncast<RenderSVGRoot>(renderer)) {
         // FIXME: evaluate if we can allow overflow for these cases too.
         // Overflow is always hidden when stand-alone SVG documents are embedded.
@@ -616,7 +615,6 @@ void LocalFrameView::applyOverflowToViewport(const RenderElement& renderer, Scro
             overflowY = Overflow::Hidden;
         }
     }
-#endif
 
     if (CheckedPtr legacyRenderSVGRoot = dynamicDowncast<LegacyRenderSVGRoot>(renderer)) {
         // FIXME: evaluate if we can allow overflow for these cases too.
@@ -1215,12 +1213,10 @@ void LocalFrameView::forceLayoutParentViewIfNeeded()
             return;
     }
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (auto* svgRoot = dynamicDowncast<RenderSVGRoot>(contentBox)) {
         if (svgRoot->everHadLayout() && !svgRoot->needsLayout())
             return;
     }
-#endif
 
     LOG(Layout, "LocalFrameView %p forceLayoutParentViewIfNeeded scheduling layout on parent LocalFrameView %p", this, &ownerRenderer->view().frameView());
 
@@ -1353,10 +1349,8 @@ RenderBox* LocalFrameView::embeddedContentBox() const
     if (auto* svgRoot = dynamicDowncast<LegacyRenderSVGRoot>(firstChild))
         return svgRoot;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (auto* svgRoot = dynamicDowncast<RenderSVGRoot>(firstChild))
         return svgRoot;
-#endif
 
     return nullptr;
 }
@@ -2287,9 +2281,11 @@ bool LocalFrameView::scrollToFragment(const URL& url)
             auto parsedTextDirectives = fragmentDirectiveParser.parsedTextDirectives();
             
             auto highlightRanges = FragmentDirectiveRangeFinder::findRangesFromTextDirectives(parsedTextDirectives, document);
-            for (auto range : highlightRanges)
-                document->fragmentHighlightRegistry().addAnnotationHighlightWithRange(StaticRange::create(range));
-            
+            if (m_frame->settings().scrollToTextFragmentMarkingEnabled()) {
+                for (auto range : highlightRanges)
+                    document->fragmentHighlightRegistry().addAnnotationHighlightWithRange(StaticRange::create(range));
+            }
+
             if (highlightRanges.size()) {
                 auto range = highlightRanges.first();
                 RefPtr commonAncestor = commonInclusiveAncestor<ComposedTree>(range);
@@ -2407,7 +2403,7 @@ void LocalFrameView::maintainScrollPositionAtScrollToTextFragmentRange(SimpleRan
 
 void LocalFrameView::scrollElementToRect(const Element& element, const IntRect& rect)
 {
-    m_frame->document()->updateLayoutIgnorePendingStylesheets();
+    m_frame->protectedDocument()->updateLayoutIgnorePendingStylesheets();
 
     LayoutRect bounds;
     if (RenderElement* renderer = element.renderer())
@@ -3977,7 +3973,7 @@ void LocalFrameView::performFixedWidthAutoSize()
 {
     LOG(Layout, "LocalFrameView %p performFixedWidthAutoSize", this);
 
-    auto* document = m_frame->document();
+    RefPtr document = m_frame->document();
     auto* renderView = document->renderView();
     auto* firstChild = renderView->firstChild();
 
@@ -4531,7 +4527,7 @@ Color LocalFrameView::documentBackgroundColor() const
         if (!fullscreenManager)
             return { };
 
-        auto* fullscreenElement = fullscreenManager->fullscreenElement();
+        RefPtr fullscreenElement = fullscreenManager->fullscreenElement();
         if (!fullscreenElement)
             return { };
 
@@ -4951,11 +4947,11 @@ void LocalFrameView::updateLayoutAndStyleIfNeededRecursive(OptionSet<LayoutOptio
 #include <span>
 
 template<typename CharacterType>
-static unsigned nonWhitespaceLength(const CharacterType* characters, unsigned length)
+static size_t nonWhitespaceLength(std::span<const CharacterType> characters)
 {
-    unsigned result = length;
-    for (unsigned i = 0; i < length; ++i) {
-        if (isASCIIWhitespace(characters[i]))
+    size_t result = characters.size();
+    for (auto character : characters) {
+        if (isASCIIWhitespace(character))
             --result;
     }
     return result;
@@ -4964,9 +4960,9 @@ static unsigned nonWhitespaceLength(const CharacterType* characters, unsigned le
 void LocalFrameView::incrementVisuallyNonEmptyCharacterCountSlowCase(const String& inlineText)
 {
     if (inlineText.is8Bit())
-        m_visuallyNonEmptyCharacterCount += nonWhitespaceLength(inlineText.characters8(), inlineText.length());
+        m_visuallyNonEmptyCharacterCount += nonWhitespaceLength(inlineText.span8());
     else
-        m_visuallyNonEmptyCharacterCount += nonWhitespaceLength(inlineText.characters16(), inlineText.length());
+        m_visuallyNonEmptyCharacterCount += nonWhitespaceLength(inlineText.span16());
     ++m_textRendererCountForVisuallyNonEmptyCharacters;
 }
 

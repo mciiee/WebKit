@@ -112,7 +112,7 @@ private:
     VisiblePosition m_position;
 };
 
-class FrameSelection final : private CaretBase, public CaretAnimationClient, public CanMakeCheckedPtr {
+class FrameSelection final : private CaretBase, public CaretAnimationClient, public CanMakeCheckedPtr<FrameSelection> {
     WTF_MAKE_NONCOPYABLE(FrameSelection);
     WTF_MAKE_FAST_ALLOCATED;
 public:
@@ -133,6 +133,7 @@ public:
         RevealSelectionBounds = 1 << 11,
         ForceCenterScroll = 1 << 12,
         ForBindings = 1 << 13,
+        DoNotNotifyEditorClients = 1 << 14,
     };
     static constexpr OptionSet<SetSelectionOption> defaultSetSelectionOptions(UserTriggered = UserTriggered::No);
 
@@ -287,6 +288,7 @@ private:
     void updateDataDetectorsForSelection();
 
     bool setSelectionWithoutUpdatingAppearance(const VisibleSelection&, OptionSet<SetSelectionOption>, CursorAlignOnScroll, TextGranularity);
+    void setNodeFlags(VisibleSelection&, bool value);
 
     void respondToNodeModification(Node&, bool anchorRemoved, bool focusRemoved, bool baseRemoved, bool extentRemoved, bool startRemoved, bool endRemoved);
     TextDirection directionOfEnclosingBlock();

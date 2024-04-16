@@ -37,6 +37,7 @@
 #include "Types.h"
 #include "WGSLShaderModule.h"
 #include <wtf/DataLog.h>
+#include <wtf/OptionSet.h>
 #include <wtf/SetForScope.h>
 #include <wtf/SortedArrayMap.h>
 
@@ -68,6 +69,14 @@ struct Binding {
     Evaluation evaluation;
     std::optional<ConstantValue> constantValue;
 };
+
+enum class Behavior : uint8_t {
+    Return = 1 << 0,
+    Break = 1 << 1,
+    Continue = 1 << 2,
+    Next = 1 << 3,
+};
+using Behaviors = OptionSet<Behavior>;
 
 static ASCIILiteral bindingKindToString(Binding::Kind kind)
 {
@@ -210,6 +219,15 @@ private:
 
     template<typename Node>
     void setConstantValue(Node&, const Type*, const ConstantValue&);
+
+    Behaviors analyze(AST::Statement&);
+    Behaviors analyze(AST::CompoundStatement&);
+    Behaviors analyze(AST::ForStatement&);
+    Behaviors analyze(AST::IfStatement&);
+    Behaviors analyze(AST::LoopStatement&);
+    Behaviors analyze(AST::SwitchStatement&);
+    Behaviors analyze(AST::WhileStatement&);
+    Behaviors analyzeStatements(AST::Statement::List&);
 
     ShaderModule& m_shaderModule;
     const Type* m_inferredType { nullptr };
@@ -409,6 +427,8 @@ TypeChecker::TypeChecker(ShaderModule& shaderModule)
 
 std::optional<FailedCheck> TypeChecker::check()
 {
+    ContextScope moduleScope(this);
+
     Base::visit(m_shaderModule);
 
     if (shouldDumpInferredTypes) {
@@ -693,6 +713,10 @@ void TypeChecker::visit(AST::Function& function)
         for (unsigned i = 0; i < parameters.size(); ++i)
             introduceValue(function.parameters()[i].name(), parameters[i]);
         Base::visit(function.body());
+
+        auto behaviours = analyze(function.body());
+        if (!behaviours.contains(Behavior::Return) && function.maybeReturnType())
+            typeError(InferBottom::No, function.span(), "missing return at end of function");
     }
 
     const Type* functionType = m_types.functionType(WTFMove(parameters), m_returnType, mustUse);
@@ -740,8 +764,8 @@ void TypeChecker::visit(AST::SizeAttribute& attribute)
 
 void TypeChecker::visit(AST::WorkgroupSizeAttribute& attribute)
 {
-    auto* xType = check(attribute.x(), Constraints::ConcreteInteger, Evaluation::Override);
-    if (!xType) {
+    auto* xType = infer(attribute.x(), Evaluation::Override);
+    if (!satisfies(xType, Constraints::ConcreteInteger)) {
         typeError(InferBottom::No, attribute.span(), "@workgroup_size x dimension must be an i32 or u32 value");
         return;
     }
@@ -749,15 +773,15 @@ void TypeChecker::visit(AST::WorkgroupSizeAttribute& attribute)
     const Type* yType = nullptr;
     const Type* zType = nullptr;
     if (auto* y = attribute.maybeY()) {
-        yType = check(*y, Constraints::ConcreteInteger, Evaluation::Override);
-        if (!yType) {
+        yType = infer(*y, Evaluation::Override);
+        if (!satisfies(yType, Constraints::ConcreteInteger)) {
             typeError(InferBottom::No, attribute.span(), "@workgroup_size y dimension must be an i32 or u32 value");
             return;
         }
 
         if (auto* z = attribute.maybeZ()) {
-            zType = check(*z, Constraints::ConcreteInteger, Evaluation::Override);
-            if (!zType) {
+            zType = infer(*z, Evaluation::Override);
+            if (!satisfies(zType, Constraints::ConcreteInteger)) {
                 typeError(InferBottom::No, attribute.span(), "@workgroup_size z dimension must be an i32 or u32 value");
                 return;
             }
@@ -1959,6 +1983,109 @@ const Type* TypeChecker::infer(AST::Expression& expression, Evaluation evaluatio
     m_inferredType = nullptr;
 
     return inferredType;
+}
+
+Behaviors TypeChecker::analyze(AST::Statement& statement)
+{
+    switch (statement.kind()) {
+    case AST::NodeKind::AssignmentStatement:
+    case AST::NodeKind::BreakStatement:
+    case AST::NodeKind::CallStatement:
+    case AST::NodeKind::CompoundAssignmentStatement:
+    case AST::NodeKind::ConstAssertStatement:
+    case AST::NodeKind::DecrementIncrementStatement:
+    case AST::NodeKind::DiscardStatement:
+    case AST::NodeKind::PhonyAssignmentStatement:
+    case AST::NodeKind::StaticAssertStatement:
+    case AST::NodeKind::VariableStatement:
+        return Behavior::Next;
+    case AST::NodeKind::ReturnStatement:
+        return Behavior::Return;
+    case AST::NodeKind::ContinueStatement:
+        return Behavior::Continue;
+    case AST::NodeKind::CompoundStatement:
+        return analyze(uncheckedDowncast<AST::CompoundStatement>(statement));
+    case AST::NodeKind::ForStatement:
+        return analyze(uncheckedDowncast<AST::ForStatement>(statement));
+    case AST::NodeKind::IfStatement:
+        return analyze(uncheckedDowncast<AST::IfStatement>(statement));
+    case AST::NodeKind::LoopStatement:
+        return analyze(uncheckedDowncast<AST::LoopStatement>(statement));
+    case AST::NodeKind::SwitchStatement:
+        return analyze(uncheckedDowncast<AST::SwitchStatement>(statement));
+    case AST::NodeKind::WhileStatement:
+        return analyze(uncheckedDowncast<AST::WhileStatement>(statement));
+    default:
+        RELEASE_ASSERT_NOT_REACHED();
+    }
+}
+
+Behaviors TypeChecker::analyze(AST::CompoundStatement& statement)
+{
+    return analyzeStatements(statement.statements());
+}
+
+Behaviors TypeChecker::analyze(AST::ForStatement& statement)
+{
+    auto behaviors = Behaviors({ Behavior::Next, Behavior::Break, Behavior::Continue });
+    behaviors.add(analyze(statement.body()));
+    behaviors.remove({ Behavior::Break, Behavior::Continue });
+    return behaviors;
+}
+
+Behaviors TypeChecker::analyze(AST::IfStatement& statement)
+{
+    auto behaviors = analyze(statement.trueBody());
+    if (auto* elseBody = statement.maybeFalseBody())
+        behaviors.add(analyze(*elseBody));
+    return behaviors;
+}
+
+Behaviors TypeChecker::analyze(AST::LoopStatement& statement)
+{
+    auto behaviors = analyzeStatements(statement.body());
+    if (auto& continuing = statement.continuing()) {
+        behaviors.add(analyzeStatements(continuing->body));
+        if (auto* breakIf = continuing->breakIf)
+            behaviors.add({ Behavior::Break, Behavior:: Continue });
+    }
+    if (behaviors.contains(Behavior::Break))
+        behaviors.remove({ Behavior::Break, Behavior::Continue });
+    else
+        behaviors.remove({ Behavior::Next, Behavior::Continue });
+    return behaviors;
+}
+
+Behaviors TypeChecker::analyze(AST::SwitchStatement& statement)
+{
+    auto behaviors = analyze(statement.defaultClause().body);
+    for (auto& clause : statement.clauses())
+        behaviors.add(analyze(clause.body));
+    if (behaviors.contains(Behavior::Break)) {
+        behaviors.remove(Behavior::Break);
+        behaviors.add(Behavior::Break);
+    }
+    return behaviors;
+}
+
+Behaviors TypeChecker::analyze(AST::WhileStatement& statement)
+{
+    auto behaviors = Behaviors({ Behavior::Next, Behavior::Break });
+    behaviors.add(analyze(statement.body()));
+    behaviors.remove({ Behavior::Break, Behavior::Continue });
+    return behaviors;
+}
+
+Behaviors TypeChecker::analyzeStatements(AST::Statement::List& statements)
+{
+    auto behaviors = Behaviors(Behavior::Next);
+    for (auto& statement : statements) {
+        behaviors.remove(Behavior::Next);
+        behaviors.add(analyze(statement));
+        if (!behaviors.contains(Behavior::Next))
+            break;
+    }
+    return behaviors;
 }
 
 const Type* TypeChecker::check(AST::Expression& expression, Constraint constraint, Evaluation evaluation)

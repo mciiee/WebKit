@@ -261,7 +261,7 @@ struct AdvanceInternalState {
     // rangeFont and font are not necessarily the same, since small-caps might change the range fot for a synthesized font, or a small-caps-synthesized font.
     RefPtr<const Font> rangeFont;
     RefPtr<const Font> nextRangeFont;
-    CheckedRef<GlyphBuffer> glyphBuffer;
+    GlyphBuffer& glyphBuffer;
     unsigned lastGlyphCount { 0 };
     Ref<const Font> primaryFont;
     float widthOfCurrentFontRange { 0 };
@@ -297,8 +297,8 @@ void WidthIterator::commitCurrentFontRange(AdvanceInternalState& advanceInternal
 {
 #if ASSERT_ENABLED
     ASSERT(advanceInternalState.rangeFont);
-    for (unsigned i = advanceInternalState.lastGlyphCount; i < advanceInternalState.glyphBuffer->size(); ++i)
-        ASSERT(&advanceInternalState.glyphBuffer->fontAt(i) == advanceInternalState.rangeFont);
+    for (unsigned i = advanceInternalState.lastGlyphCount; i < advanceInternalState.glyphBuffer.size(); ++i)
+        ASSERT(&advanceInternalState.glyphBuffer.fontAt(i) == advanceInternalState.rangeFont);
 #endif
 
     auto applyFontTransformsResult = applyFontTransforms(advanceInternalState.glyphBuffer, advanceInternalState.lastGlyphCount, *advanceInternalState.rangeFont, advanceInternalState.charactersTreatedAsSpace);
@@ -310,7 +310,7 @@ void WidthIterator::commitCurrentFontRange(AdvanceInternalState& advanceInternal
         m_fallbackFonts->add(*advanceInternalState.rangeFont);
 
     advanceInternalState.widthOfCurrentFontRange = 0;
-    advanceInternalState.lastGlyphCount = advanceInternalState.glyphBuffer->size();
+    advanceInternalState.lastGlyphCount = advanceInternalState.glyphBuffer.size();
 }
 
 static const Font* fontForRange(const Font* font, const SmallCapsState& smallCapsData, bool isSmallCaps)
@@ -371,7 +371,7 @@ static void updateCharacterAndSmallCapsIfNeeded(SmallCapsState& smallCapsState, 
 template <typename TextIterator>
 inline void WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuffer& glyphBuffer)
 {
-    // The core logic here needs to match FontCascade::widthForSimpleText()
+    // The core logic here needs to match FontCascade::widthForTextUsingSimplifiedMeasuring()
     FloatRect bounds;
     auto fontDescription = m_font->fontDescription();
     Ref primaryFont = m_font->primaryFont();
@@ -808,7 +808,7 @@ void WidthIterator::advance(unsigned offset, GlyphBuffer& glyphBuffer)
         advanceInternal(textIterator, glyphBuffer);
     } else {
 #if USE(CLUSTER_AWARE_WIDTH_ITERATOR)
-        ComposedCharacterClusterTextIterator textIterator(m_run->data16(m_currentCharacterIndex), m_currentCharacterIndex, offset, length);
+        ComposedCharacterClusterTextIterator textIterator(m_run->span16(m_currentCharacterIndex), m_currentCharacterIndex, offset);
 #else
         SurrogatePairAwareTextIterator textIterator(m_run->data16(m_currentCharacterIndex), m_currentCharacterIndex, offset, length);
 #endif

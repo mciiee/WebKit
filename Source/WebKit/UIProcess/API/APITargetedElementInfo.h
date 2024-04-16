@@ -27,6 +27,7 @@
 
 #include "APIObject.h"
 #include <WebCore/ElementTargetingTypes.h>
+#include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
 #include <wtf/WeakPtr.h>
 
@@ -35,6 +36,8 @@ class WebPageProxy;
 }
 
 namespace API {
+
+class FrameTreeNode;
 
 class TargetedElementInfo final : public ObjectImpl<Object::Type::TargetedElementInfo> {
 public:
@@ -52,6 +55,12 @@ public:
     WebCore::PositionType positionType() const { return m_info.positionType; }
     WebCore::FloatRect boundsInRootView() const { return m_info.boundsInRootView; }
     WebCore::FloatRect boundsInWebView() const;
+    WebCore::FloatRect boundsInClientCoordinates() const { return m_info.boundsInClientCoordinates; }
+
+    bool isUnderPoint() const { return m_info.isUnderPoint; }
+    bool isPseudoElement() const { return m_info.isPseudoElement; }
+
+    void childFrames(CompletionHandler<void(Vector<Ref<FrameTreeNode>>&&)>&&) const;
 
     bool isSameElement(const TargetedElementInfo&) const;
 

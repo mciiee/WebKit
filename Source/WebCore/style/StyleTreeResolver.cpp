@@ -815,7 +815,7 @@ std::unique_ptr<RenderStyle> TreeResolver::resolveStartingStyle(const ResolvedSt
     if (startingStyle->display() == DisplayType::None)
         return nullptr;
 
-    Adjuster adjuster(m_document, parentAfterChangeStyle, resolutionContext.parentBoxStyle, styleable.pseudoElementIdentifier ? &styleable.element : nullptr);
+    Adjuster adjuster(m_document, parentAfterChangeStyle, resolutionContext.parentBoxStyle, !styleable.pseudoElementIdentifier ? &styleable.element : nullptr);
     adjuster.adjust(*startingStyle, nullptr);
 
     return startingStyle;

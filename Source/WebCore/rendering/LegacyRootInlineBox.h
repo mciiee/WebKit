@@ -23,6 +23,7 @@
 #include "BidiContext.h"
 #include "LegacyInlineFlowBox.h"
 #include "RenderBox.h"
+#include <wtf/FastMalloc.h>
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
@@ -34,7 +35,7 @@ class RenderBlockFlow;
 struct BidiStatus;
 struct GapRects;
 
-class LegacyRootInlineBox : public LegacyInlineFlowBox, public CanMakeWeakPtr<LegacyRootInlineBox>, public CanMakeCheckedPtr {
+class LegacyRootInlineBox : public LegacyInlineFlowBox, public CanMakeWeakPtr<LegacyRootInlineBox>, public CanMakeCheckedPtr<LegacyRootInlineBox> {
     WTF_MAKE_ISO_ALLOCATED(LegacyRootInlineBox);
 public:
     explicit LegacyRootInlineBox(RenderBlockFlow&);
@@ -70,18 +71,6 @@ public:
         m_lineBoxBottom = lineBoxBottom;
     }
 
-    RenderObject* lineBreakObj() const { return m_lineBreakObj.get(); }
-    BidiStatus lineBreakBidiStatus() const;
-    void setLineBreakInfo(RenderObject*, unsigned breakPos, const BidiStatus&);
-
-    unsigned lineBreakPos() const { return m_lineBreakPos; }
-    void setLineBreakPos(unsigned p) { m_lineBreakPos = p; }
-
-    using LegacyInlineBox::endsWithBreak;
-    using LegacyInlineBox::setEndsWithBreak;
-
-    void childRemoved(LegacyInlineBox*);
-
     LayoutUnit baselinePosition(FontBaseline baselineType) const final;
     LayoutUnit lineHeight() const final;
 
@@ -94,8 +83,6 @@ public:
     void removeLineBoxFromRenderObject() final;
     
     FontBaseline baselineType() const { return static_cast<FontBaseline>(m_baselineType); }
-
-    LayoutRect paddedLayoutOverflowRect(LayoutUnit endPadding) const;
     
     LayoutUnit logicalTopVisualOverflow() const
     {
@@ -104,14 +91,6 @@ public:
     LayoutUnit logicalBottomVisualOverflow() const
     {
         return LegacyInlineFlowBox::logicalBottomVisualOverflow(lineBottom());
-    }
-    LayoutUnit logicalTopLayoutOverflow() const
-    {
-        return LegacyInlineFlowBox::logicalTopLayoutOverflow(lineTop());
-    }
-    LayoutUnit logicalBottomLayoutOverflow() const
-    {
-        return LegacyInlineFlowBox::logicalBottomLayoutOverflow(lineBottom());
     }
 
 #if ENABLE(TREE_DEBUGGING)
@@ -122,13 +101,6 @@ private:
     bool isRootInlineBox() const final { return true; }
 
     LayoutUnit lineSnapAdjustment(LayoutUnit delta = 0_lu) const;
-
-    unsigned m_lineBreakPos { 0 };
-
-    // Where this line ended. The exact object and the position within that object are stored so that
-    // we can create an LegacyInlineIterator beginning just after the end of this line.
-    SingleThreadWeakPtr<RenderObject> m_lineBreakObj;
-    RefPtr<BidiContext> m_lineBreakContext;
 
     LayoutUnit m_lineTop;
     LayoutUnit m_lineBottom;

@@ -164,6 +164,10 @@
 #define ENABLE_CONTEXT_MENU_EVENT 1
 #endif
 
+#if !defined(ENABLE_CSS_PAINTING_API)
+#define ENABLE_CSS_PAINTING_API 1
+#endif
+
 #if !defined(ENABLE_CSS_TRANSFORM_STYLE_OPTIMIZED_3D)
 #define ENABLE_CSS_TRANSFORM_STYLE_OPTIMIZED_3D 0
 #endif
@@ -317,10 +321,6 @@
 
 #if !defined(ENABLE_KINETIC_SCROLLING)
 #define ENABLE_KINETIC_SCROLLING 0
-#endif
-
-#if !defined(ENABLE_LAYER_BASED_SVG_ENGINE)
-#define ENABLE_LAYER_BASED_SVG_ENGINE 0
 #endif
 
 #if !defined(ENABLE_LLVM_PROFILE_GENERATION)
@@ -744,6 +744,10 @@
 #define ENABLE_WEBASSEMBLY_BBQJIT 1
 #endif
 
+#if !defined(ENABLE_WEBASSEMBLY) && CPU(ADDRESS64) && PLATFORM(COCOA) && !ENABLE(C_LOOP)
+#define ENABLE_WEBASSEMBLY 1
+#endif
+
 /* The SamplingProfiler is the probabilistic and low-overhead profiler used by
  * JSC to measure where time is spent inside a JavaScript program.
  * In configurations other than Windows and Darwin, because layout of mcontext_t depends on standard libraries (like glibc),
@@ -809,9 +813,14 @@
 #define ENABLE_YARR_JIT_REGEXP_TEST_INLINE 1
 #endif
 
-/* Enable JIT'ing Regular Expressions that have nested back references. */
+/* Enable JIT'ing Regular Expressions that have back references. */
 #if ENABLE(YARR_JIT) && (CPU(ARM64) || (CPU(X86_64) && !OS(WINDOWS)) || CPU(RISCV64))
 #define ENABLE_YARR_JIT_BACKREFERENCES 1
+#if CPU(ARM64) || (CPU(X86_64) && !OS(WINDOWS))
+#define ENABLE_YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS 1
+#else
+#define ENABLE_YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS 0
+#endif
 #endif
 
 #if ENABLE(YARR_JIT) && (CPU(ARM64) || CPU(X86_64) || CPU(RISCV64))
@@ -866,7 +875,7 @@
 #endif
 
 /* CSS Selector JIT Compiler */
-#if !defined(ENABLE_CSS_SELECTOR_JIT) && ((CPU(X86_64) || CPU(ARM64) || (CPU(ARM_THUMB2) && OS(DARWIN))) && ENABLE(JIT) && (OS(DARWIN) || OS(WINDOWS) || PLATFORM(GTK) || PLATFORM(WPE)))
+#if !defined(ENABLE_CSS_SELECTOR_JIT) && ((CPU(X86_64) || CPU(ARM64)) && ENABLE(JIT) && (OS(DARWIN) || OS(WINDOWS) || PLATFORM(GTK) || PLATFORM(WPE)))
 #define ENABLE_CSS_SELECTOR_JIT 1
 #endif
 

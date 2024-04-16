@@ -38,6 +38,7 @@
 #include <variant>
 #include <wtf/HashSet.h>
 #include <wtf/ObjectIdentifier.h>
+#include <wtf/ProcessID.h>
 #include <wtf/RefCounted.h>
 #include <wtf/ThreadSafeWeakPtr.h>
 #include <wtf/WallTime.h>
@@ -726,22 +727,29 @@ enum class AccessibilityOrientation {
     Undefined,
 };
 
-struct AccessibilityTextUnderElementMode {
-    enum ChildrenInclusion {
-        TextUnderElementModeSkipIgnoredChildren,
-        TextUnderElementModeIncludeAllChildren,
-        TextUnderElementModeIncludeNameFromContentsChildren, // This corresponds to ARIA concept: nameFrom
+enum class TrimWhitespace : bool { No, Yes };
+
+struct TextUnderElementMode {
+    enum class Children : uint8_t {
+        SkipIgnoredChildren,
+        IncludeAllChildren,
+        IncludeNameFromContentsChildren, // This corresponds to ARIA concept: nameFrom
     };
 
-    ChildrenInclusion childrenInclusion;
+    Children childrenInclusion;
     bool includeFocusableContent;
+    bool considerHiddenState { true };
+    bool inHiddenSubtree { false };
+    TrimWhitespace trimWhitespace { TrimWhitespace::Yes };
     Node* ignoredChildNode;
 
-    AccessibilityTextUnderElementMode(ChildrenInclusion c = TextUnderElementModeSkipIgnoredChildren, bool i = false, Node* ignored = nullptr)
-        : childrenInclusion(c)
-        , includeFocusableContent(i)
-        , ignoredChildNode(ignored)
+    TextUnderElementMode(Children childrenInclusion = Children::SkipIgnoredChildren, bool includeFocusable = false, Node* ignoredChild = nullptr)
+        : childrenInclusion(childrenInclusion)
+        , includeFocusableContent(includeFocusable)
+        , ignoredChildNode(ignoredChild)
     { }
+
+    bool isHidden() { return considerHiddenState && inHiddenSubtree; }
 };
 
 enum class AccessibilityVisiblePositionForBounds {
@@ -810,6 +818,7 @@ public:
     void setObjectID(AXID axID) { m_id = axID; }
     AXID objectID() const { return m_id; }
     virtual AXID treeID() const = 0;
+    virtual ProcessID processID() const = 0;
 
     // When the corresponding WebCore object that this accessible object
     // represents is deleted, it must be detached.
@@ -821,7 +830,6 @@ public:
     virtual bool isAccessibilityObject() const = 0;
     virtual bool isAccessibilityRenderObject() const = 0;
     virtual bool isAccessibilityTableInstance() const = 0;
-    virtual bool isAccessibilityARIAGridInstance() const = 0;
     virtual bool isAccessibilityARIAGridRowInstance() const = 0;
     virtual bool isAccessibilityARIAGridCellInstance() const = 0;
     virtual bool isAXIsolatedObjectInstance() const = 0;
@@ -839,7 +847,7 @@ public:
     bool isCheckbox() const { return roleValue() == AccessibilityRole::Checkbox; }
     bool isRadioButton() const { return roleValue() == AccessibilityRole::RadioButton; }
     bool isListBox() const { return roleValue() == AccessibilityRole::ListBox; }
-    virtual bool isListBoxOption() const = 0;
+    bool isListBoxOption() const { return roleValue() == AccessibilityRole::ListBoxOption; }
     virtual bool isAttachment() const = 0;
     bool isMenuRelated() const;
     bool isMenu() const { return roleValue() == AccessibilityRole::Menu; }
@@ -1139,7 +1147,7 @@ public:
 
     // Methods for determining accessibility text.
     virtual String stringValue() const = 0;
-    virtual String textUnderElement(AccessibilityTextUnderElementMode = AccessibilityTextUnderElementMode()) const = 0;
+    virtual String textUnderElement(TextUnderElementMode = TextUnderElementMode()) const = 0;
     virtual String text() const = 0;
     virtual unsigned textLength() const = 0;
 #if PLATFORM(COCOA)
@@ -1256,8 +1264,7 @@ public:
     virtual void detachFromParent() = 0;
     virtual bool isDetachedFromParent() = 0;
 
-    bool canHaveSelectedChildren() const;
-    virtual AccessibilityChildrenVector selectedChildren() = 0;
+    virtual std::optional<AccessibilityChildrenVector> selectedChildren() = 0;
     virtual void setSelectedChildren(const AccessibilityChildrenVector&) = 0;
     virtual AccessibilityChildrenVector visibleChildren() = 0;
     AccessibilityChildrenVector tabChildren();
@@ -1597,9 +1604,9 @@ template<typename T>
 T* findRelatedObjectInAncestry(const T& object, AXRelationType relationType, const T& descendant)
 {
     auto relatedObjects = object.relatedObjects(relationType);
-    for (const auto& object : relatedObjects) {
-        auto* ancestor = findAncestor(descendant, false, [&object] (const auto& ancestor) {
-            return object.get() == &ancestor;
+    for (const auto& relatedObject : relatedObjects) {
+        auto* ancestor = findAncestor(descendant, false, [&relatedObject] (const auto& ancestor) {
+            return relatedObject.get() == &ancestor;
         });
         if (ancestor)
             return ancestor;
@@ -1628,7 +1635,7 @@ T* findChild(T& object, F&& matches)
 {
     for (auto child : object.children()) {
         if (matches(child))
-            return checkedDowncast<T>(child.get());
+            return downcast<T>(child.get());
     }
     return nullptr;
 }
@@ -1724,5 +1731,6 @@ WTF::TextStream& operator<<(WTF::TextStream&, const AXCoreObject&);
 WTF::TextStream& operator<<(WTF::TextStream&, AccessibilityText);
 WTF::TextStream& operator<<(WTF::TextStream&, AccessibilityTextSource);
 WTF::TextStream& operator<<(WTF::TextStream&, AXRelationType);
+WTF::TextStream& operator<<(WTF::TextStream&, const TextUnderElementMode&);
 
 } // namespace WebCore

@@ -110,7 +110,9 @@ RenderObject::SetLayoutNeededForbiddenScope::~SetLayoutNeededForbiddenScope()
 
 #endif
 
-struct SameSizeAsRenderObject : public CachedImageClient, public CanMakeCheckedPtr {
+struct SameSizeAsRenderObject : public CachedImageClient, public CanMakeCheckedPtr<SameSizeAsRenderObject> {
+    WTF_MAKE_STRUCT_FAST_ALLOCATED;
+
     virtual ~SameSizeAsRenderObject() = default; // Allocate vtable pointer.
 #if ASSERT_ENABLED
     unsigned m_debugBitfields : 2;
@@ -309,14 +311,14 @@ void RenderObject::initializeFragmentedFlowStateOnInsertion()
 
 void RenderObject::resetFragmentedFlowStateOnRemoval()
 {
+    ASSERT(!renderTreeBeingDestroyed());
+
     if (fragmentedFlowState() == FragmentedFlowState::NotInsideFlow)
         return;
 
-    if (!renderTreeBeingDestroyed()) {
-        if (auto* renderElement = dynamicDowncast<RenderElement>(*this)) {
-            renderElement->removeFromRenderFragmentedFlow();
-            return;
-        }
+    if (auto* renderElement = dynamicDowncast<RenderElement>(*this)) {
+        renderElement->removeFromRenderFragmentedFlow();
+        return;
     }
 
     // A RenderFragmentedFlow is always considered to be inside itself, so it never has to change its state in response to parent changes.
@@ -537,10 +539,8 @@ static inline bool objectIsRelayoutBoundary(const RenderElement* object)
     if (!object->hasNonVisibleOverflow())
         return false;
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (object->document().settings().layerBasedSVGEngineEnabled() && object->isSVGLayerAwareRenderer())
         return false;
-#endif
 
     if (object->style().width().isIntrinsicOrAuto() || object->style().height().isIntrinsicOrAuto() || object->style().height().isPercentOrCalculated())
         return false;
@@ -568,20 +568,17 @@ void RenderObject::clearNeedsLayout(EverHadSkippedContentLayout everHadSkippedCo
 #endif
 }
 
-static void scheduleRelayoutForSubtree(RenderElement& renderer)
+void RenderObject::scheduleLayout(RenderElement* layoutRoot)
 {
-    if (auto* renderView = dynamicDowncast<RenderView>(renderer)) {
-        renderView->protectedFrameView()->checkedLayoutContext()->scheduleLayout();
-        return;
-    }
+    if (auto* renderView = dynamicDowncast<RenderView>(layoutRoot))
+        return renderView->protectedFrameView()->checkedLayoutContext()->scheduleLayout();
 
-    if (renderer.isRooted())
-        renderer.view().protectedFrameView()->checkedLayoutContext()->scheduleSubtreeLayout(renderer);
+    if (layoutRoot && layoutRoot->isRooted())
+        layoutRoot->view().protectedFrameView()->checkedLayoutContext()->scheduleSubtreeLayout(*layoutRoot);
 }
 
-void RenderObject::markContainingBlocksForLayout(ScheduleRelayout scheduleRelayout, RenderElement* newRoot)
+RenderElement* RenderObject::markContainingBlocksForLayout(RenderElement* layoutRoot)
 {
-    ASSERT(scheduleRelayout == ScheduleRelayout::No || !newRoot);
     ASSERT(!isSetNeedsLayoutForbidden());
 
     CheckedPtr ancestor = container();
@@ -596,42 +593,44 @@ void RenderObject::markContainingBlocksForLayout(ScheduleRelayout scheduleRelayo
         // Don't mark the outermost object of an unrooted subtree. That object will be
         // marked when the subtree is added to the document.
         CheckedPtr container = ancestor->container();
-        if (!container && !ancestor->isRenderView())
-            return;
+        if (!container && !ancestor->isRenderView()) {
+            // Internal render tree shuffle.
+            return { };
+        }
+
         if (hasOutOfFlowPosition) {
             bool willSkipRelativelyPositionedInlines = !ancestor->isRenderBlock() || ancestor->isAnonymousBlock();
             // Skip relatively positioned inlines and anonymous blocks to get to the enclosing RenderBlock.
             while (ancestor && (!ancestor->isRenderBlock() || ancestor->isAnonymousBlock()))
                 ancestor = ancestor->container();
             if (!ancestor || ancestor->posChildNeedsLayout())
-                return;
+                return { };
             if (willSkipRelativelyPositionedInlines)
                 container = ancestor->container();
             ancestor->setPosChildNeedsLayoutBit(true);
             simplifiedNormalFlowLayout = true;
         } else if (simplifiedNormalFlowLayout) {
             if (ancestor->needsSimplifiedNormalFlowLayout())
-                return;
+                return { };
             ancestor->setNeedsSimplifiedNormalFlowLayoutBit(true);
         } else {
             if (ancestor->normalChildNeedsLayout())
-                return;
+                return { };
             ancestor->setNormalChildNeedsLayoutBit(true);
         }
         ASSERT(!ancestor->isSetNeedsLayoutForbidden());
 
-        if (ancestor == newRoot)
-            return;
-
-        if (scheduleRelayout == ScheduleRelayout::Yes && objectIsRelayoutBoundary(ancestor.get()))
-            break;
+        if (layoutRoot) {
+            // Having a valid layout root also mean we should not stop at layout boundaries.
+            if (ancestor == layoutRoot)
+                return layoutRoot;
+        } else if (objectIsRelayoutBoundary(ancestor.get()))
+            return ancestor.get();
 
         hasOutOfFlowPosition = ancestor->isOutOfFlowPositioned();
         ancestor = WTFMove(container);
     }
-
-    if (scheduleRelayout == ScheduleRelayout::Yes && ancestor)
-        scheduleRelayoutForSubtree(*ancestor);
+    return { };
 }
 
 #if ASSERT_ENABLED
@@ -656,20 +655,21 @@ void RenderObject::invalidateContainerPreferredLogicalWidths()
 {
     // In order to avoid pathological behavior when inlines are deeply nested, we do include them
     // in the chain that we mark dirty (even though they're kind of irrelevant).
-    CheckedPtr o = isRenderTableCell() ? containingBlock() : container();
-    while (o && !o->preferredLogicalWidthsDirty()) {
-        // Don't invalidate the outermost object of an unrooted subtree. That object will be 
+    CheckedPtr ancestor = isRenderTableCell() ? containingBlock() : container();
+    while (ancestor && !ancestor->preferredLogicalWidthsDirty()) {
+        // Don't invalidate the outermost object of an unrooted subtree. That object will be
         // invalidated when the subtree is added to the document.
-        CheckedPtr container = o->isRenderTableCell() ? o->containingBlock() : o->container();
-        if (!container && !o->isRenderView())
+        CheckedPtr container = ancestor->isRenderTableCell() ? ancestor->containingBlock() : ancestor->container();
+        if (!container && !ancestor->isRenderView())
             break;
 
-        o->m_stateBitfields.setFlag(StateFlag::PreferredLogicalWidthsDirty, true);
-        if (o->style().hasOutOfFlowPosition())
+        ancestor->m_stateBitfields.setFlag(StateFlag::PreferredLogicalWidthsDirty, true);
+        if (ancestor->style().hasOutOfFlowPosition()) {
             // A positioned object has no effect on the min/max width of its containing block ever.
             // We can optimize this case and not go up any further.
             break;
-        o = WTFMove(container);
+        }
+        ancestor = WTFMove(container);
     }
 }
 
@@ -1037,23 +1037,26 @@ void RenderObject::issueRepaint(std::optional<LayoutRect> partialRepaintRect, Cl
     repaintUsingContainer(repaintContainer.renderer.get(), repaintRect, clipRepaintToLayer == ClipRepaintToLayer::Yes);
 }
 
-void RenderObject::repaint() const
+void RenderObject::repaint(ForceRepaint forceRepaint) const
 {
-    // Don't repaint if we're unrooted (note that view() still returns the view when unrooted)
-    if (!isRooted() || view().printing())
+    ASSERT(isDescendantOf(&view()) || is<RenderScrollbarPart>(this) || is<RenderReplica>(this));
+
+    if (view().printing())
         return;
-    issueRepaint();
+    issueRepaint({ }, ClipRepaintToLayer::No, forceRepaint);
 }
 
 void RenderObject::repaintRectangle(const LayoutRect& repaintRect, bool shouldClipToLayer) const
 {
+    ASSERT(isDescendantOf(&view()) || is<RenderScrollbarPart>(this));
     return repaintRectangle(repaintRect, shouldClipToLayer ? ClipRepaintToLayer::Yes : ClipRepaintToLayer::No, ForceRepaint::No);
 }
 
 void RenderObject::repaintRectangle(const LayoutRect& repaintRect, ClipRepaintToLayer shouldClipToLayer, ForceRepaint forceRepaint, std::optional<LayoutBoxExtent> additionalRepaintOutsets) const
 {
-    // Don't repaint if we're unrooted (note that view() still returns the view when unrooted)
-    if (!isRooted() || view().printing())
+    ASSERT(isDescendantOf(&view()) || is<RenderScrollbarPart>(this) || is<RenderReplica>(this));
+
+    if (view().printing())
         return;
     // FIXME: layoutDelta needs to be applied in parts before/after transforms and
     // repaint containers. https://bugs.webkit.org/show_bug.cgi?id=23308
@@ -1064,9 +1067,7 @@ void RenderObject::repaintRectangle(const LayoutRect& repaintRect, ClipRepaintTo
 
 void RenderObject::repaintSlowRepaintObject() const
 {
-    // Don't repaint if we're unrooted (note that view() still returns the view when unrooted)
-    if (!isRooted())
-        return;
+    ASSERT(isDescendantOf(&view()) || is<RenderScrollbarPart>(this) || is<RenderReplica>(this));
 
     CheckedRef view = this->view();
     if (view->printing())
@@ -1370,11 +1371,9 @@ void RenderObject::outputRenderObject(TextStream& stream, bool mark, int depth) 
         if (renderBox->isInFlowPositioned())
             boxRect.move(renderBox->offsetForInFlowPosition());
         stream << " " << boxRect;
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     } else if (auto* renderSVGModelObject = dynamicDowncast<RenderSVGModelObject>(*this)) {
         ASSERT(!renderSVGModelObject->isInFlowPositioned());
         stream << " " << renderSVGModelObject->frameRectEquivalent();
-#endif
     } else if (auto* renderInline = dynamicDowncast<RenderInline>(*this); renderInline && isInFlowPositioned()) {
         FloatSize inlineOffset = renderInline->offsetForInFlowPosition();
         stream << "  (" << inlineOffset.width() << ", " << inlineOffset.height() << ")";
@@ -1385,7 +1384,8 @@ void RenderObject::outputRenderObject(TextStream& stream, bool mark, int depth) 
     if (node()) {
         stream << " node (" << node() << ")";
         if (node()->isTextNode()) {
-            String value = node()->nodeValue();
+            ASSERT(is<RenderText>(*this));
+            auto value = downcast<RenderText>(*this).text();
             stream << " length->(" << value.length() << ")";
 
             value = makeStringByReplacingAll(value, '\\', "\\\\"_s);
@@ -1416,14 +1416,12 @@ void RenderObject::outputRenderObject(TextStream& stream, bool mark, int depth) 
         }
     }
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     if (auto* renderSVGModelObject = dynamicDowncast<RenderSVGModelObject>(*this)) {
         if (renderSVGModelObject->hasVisualOverflow()) {
             auto visualOverflow = renderSVGModelObject->visualOverflowRectEquivalent();
             stream << " (visual overflow " << visualOverflow.x() << "," << visualOverflow.y() << " " << visualOverflow.width() << "x" << visualOverflow.height() << ")";
         }
     }
-#endif
 
     if (auto* multicolSet = dynamicDowncast<RenderMultiColumnSet>(*this))
         stream << " (column count " << multicolSet->computedColumnCount() << ", size " << multicolSet->computedColumnWidth() << "x" << multicolSet->computedColumnHeight() << ", gap " << multicolSet->columnGap() << ")";
@@ -1790,10 +1788,10 @@ static void invalidateLineLayoutAfterTreeMutationIfNeeded(RenderObject& renderer
         return !modernLineLayout->insertedIntoTree(*renderer.parent(), renderer);
     };
     if (shouldInvalidateLineLayoutPath())
-        container->invalidateLineLayoutPath();
+        container->invalidateLineLayoutPath(RenderBlockFlow::InvalidationReason::InsertionOrRemoval);
 }
 
-void RenderObject::insertedIntoTree(IsInternalMove)
+void RenderObject::insertedIntoTree()
 {
     invalidateLineLayoutAfterTreeMutationIfNeeded(*this, IsRemoval::No);
     // FIXME: We should ASSERT(isRooted()) here but generated content makes some out-of-order insertion.
@@ -1801,7 +1799,7 @@ void RenderObject::insertedIntoTree(IsInternalMove)
         checkedParent()->dirtyLinesFromChangedChild(*this);
 }
 
-void RenderObject::willBeRemovedFromTree(IsInternalMove)
+void RenderObject::willBeRemovedFromTree()
 {
     invalidateLineLayoutAfterTreeMutationIfNeeded(*this, IsRemoval::Yes);
     // FIXME: We should ASSERT(isRooted()) but we have some out-of-order removals which would need to be fixed first.
@@ -1827,13 +1825,13 @@ void RenderObject::destroy()
     delete this;
 }
 
-Position RenderObject::positionForPoint(const LayoutPoint& point)
+Position RenderObject::positionForPoint(const LayoutPoint& point, HitTestSource source)
 {
     // FIXME: This should just create a Position object instead (webkit.org/b/168566). 
-    return positionForPoint(point, nullptr).deepEquivalent();
+    return positionForPoint(point, source, nullptr).deepEquivalent();
 }
 
-VisiblePosition RenderObject::positionForPoint(const LayoutPoint&, const RenderFragmentContainer*)
+VisiblePosition RenderObject::positionForPoint(const LayoutPoint&, HitTestSource, const RenderFragmentContainer*)
 {
     return createVisiblePosition(caretMinOffset(), Affinity::Downstream);
 }

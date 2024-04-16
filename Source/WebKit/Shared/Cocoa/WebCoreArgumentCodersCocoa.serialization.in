@@ -54,10 +54,6 @@ header: <WebCore/FontCustomPlatformData.h>
     String itemInCollection;
     WebCore::RenderingResourceIdentifier renderingResourceIdentifier;
 };
-
-[CreateUsing=tryMakeFromSerializationData, RefCounted] struct WebCore::FontCustomPlatformData {
-    WebCore::FontCustomPlatformSerializedData serializedData()
-};
 #endif
 
 #if ENABLE(CONTENT_FILTERING)
@@ -90,7 +86,7 @@ header: <WebCore/ResourceRequest.h>
 [Nested] struct WebCore::AttributedString::ParagraphStyleWithTableAndListIDs {
     RetainPtr<NSParagraphStyle> style
     Vector<std::optional<WebCore::AttributedString::TableBlockAndTableIDPair>> tableBlockAndTableIDs
-    Vector<WebCore::AttributedString::TextListID> listIDs
+    Vector<WebCore::AttributedStringTextListID> listIDs
 }
 using WebCore::AttributedString::TableBlockAndTableIDPair = std::pair<WebCore::AttributedStringTextTableBlockID, WebCore::AttributedStringTextTableID>
 
@@ -187,7 +183,7 @@ class WebCore::PaymentSessionError {
     WebCore::PaymentContact shippingContact();
     Vector<String> supportedNetworks();
     WebCore::ApplePaySessionPaymentRequest::MerchantCapabilities merchantCapabilities();
-    WebCore::ApplePaySessionPaymentRequest::ShippingType shippingType();
+    WebCore::ApplePaySessionPaymentRequestShippingType shippingType();
     Vector<WebCore::ApplePayShippingMethod> shippingMethods();
     Vector<WebCore::ApplePayLineItem> lineItems();
     WebCore::ApplePayLineItem total();
@@ -357,3 +353,12 @@ NSNumber wrapped by CoreIPCNumber
 NSString wrapped by CoreIPCString
 NSDictionary wrapped by CoreIPCDictionary
 NSPresentationIntent wrapped by CoreIPCPresentationIntent
+
+#if PLATFORM(MAC)
+using NSColor = PlatformColor
+using CGDirectDisplayID = uint32_t
+#endif
+
+using CFTimeInterval = double
+using CGGlyph = uint16_t
+using NSRect = CGRect

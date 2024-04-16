@@ -75,6 +75,7 @@
 #import <WebCore/DataDetectionResultsStorage.h>
 #import <WebCore/DiagnosticLoggingClient.h>
 #import <WebCore/DiagnosticLoggingKeys.h>
+#import <WebCore/Document.h>
 #import <WebCore/DocumentLoader.h>
 #import <WebCore/DocumentMarkerController.h>
 #import <WebCore/DragController.h>
@@ -111,6 +112,7 @@
 #import <WebCore/HandleUserInputEventResult.h>
 #import <WebCore/HistoryItem.h>
 #import <WebCore/HitTestResult.h>
+#import <WebCore/HitTestSource.h>
 #import <WebCore/Image.h>
 #import <WebCore/ImageOverlay.h>
 #import <WebCore/InputMode.h>
@@ -154,6 +156,7 @@
 #import <WebCore/TextPlaceholderElement.h>
 #import <WebCore/UserAgent.h>
 #import <WebCore/UserGestureIndicator.h>
+#import <WebCore/ViewportArguments.h>
 #import <WebCore/VisibleUnits.h>
 #import <WebCore/WebEvent.h>
 #import <pal/system/ios/UserInterfaceIdiom.h>
@@ -215,7 +218,7 @@ static void adjustCandidateAutocorrectionInFrame(const String& correction, Local
     if (!referenceRange)
         return;
 
-    auto correctedRange = findPlainText(*referenceRange, correction, { Backwards });
+    auto correctedRange = findPlainText(*referenceRange, correction, { FindOption::Backwards });
     if (correctedRange.collapsed())
         return;
 
@@ -2777,7 +2780,7 @@ bool WebPage::applyAutocorrectionInternal(const String& correction, const String
                 textForRange = emptyString();
                 range = makeSimpleRange(position);
             } else if (auto searchRange = rangeExpandedAroundPositionByCharacters(position, characterCount)) {
-                if (auto foundRange = findPlainText(*searchRange, originalTextWithFoldedQuoteMarks, { DoNotSetSelection, DoNotRevealSelection }); !foundRange.collapsed()) {
+                if (auto foundRange = findPlainText(*searchRange, originalTextWithFoldedQuoteMarks, { FindOption::DoNotSetSelection, FindOption::DoNotRevealSelection }); !foundRange.collapsed()) {
                     textForRange = plainTextForContext(foundRange);
                     range = foundRange;
                 }
@@ -3279,7 +3282,7 @@ static void selectionPositionInformation(WebPage& page, const InteractionInforma
     }
 #if PLATFORM(MACCATALYST)
     bool isInsideFixedPosition;
-    VisiblePosition caretPosition(renderer->positionForPoint(request.point, nullptr));
+    VisiblePosition caretPosition(renderer->positionForPoint(request.point, HitTestSource::User, nullptr));
     info.caretRect = caretPosition.absoluteCaretBounds(&isInsideFixedPosition);
 #endif
 }
@@ -4132,18 +4135,40 @@ void WebPage::resetViewportDefaultConfiguration(WebFrame* frame, bool hasMobileD
         return;
     }
 
-    if (hasMobileDocType) {
+    RefPtr document = frame->coreLocalFrame()->document();
+
+    auto updateViewportConfigurationForMobileDocType = [this, document] {
         m_viewportConfiguration.setDefaultConfiguration(ViewportConfiguration::xhtmlMobileParameters());
-        return;
+
+        // Do not update the viewport arguments if they are already configured from, say, a meta tag.
+        if (m_viewportConfiguration.viewportArguments().type >= ViewportArguments::Type::CSSDeviceAdaptation)
+            return;
+
+        if (!document || !document->isViewportDocument())
+            return;
+
+        auto viewportArguments = ViewportArguments { ViewportArguments::Type::CSSDeviceAdaptation };
+        document->setViewportArguments(viewportArguments);
+        viewportPropertiesDidChange(viewportArguments);
+    };
+
+    if (hasMobileDocType) {
+        return updateViewportConfigurationForMobileDocType();
     }
 
-    auto* document = frame->coreLocalFrame()->document();
-    if (document->isImageDocument())
-        m_viewportConfiguration.setDefaultConfiguration(ViewportConfiguration::imageDocumentParameters());
-    else if (document->isTextDocument())
-        m_viewportConfiguration.setDefaultConfiguration(ViewportConfiguration::textDocumentParameters());
-    else
-        m_viewportConfiguration.setDefaultConfiguration(parametersForStandardFrame());
+    bool configureWithParametersForStandardFrame = !document;
+
+    if (document) {
+        if (document->isImageDocument())
+            m_viewportConfiguration.setDefaultConfiguration(ViewportConfiguration::imageDocumentParameters());
+        else if (document->isTextDocument())
+            m_viewportConfiguration.setDefaultConfiguration(ViewportConfiguration::textDocumentParameters());
+        else
+            configureWithParametersForStandardFrame = true;
+    }
+
+    if (configureWithParametersForStandardFrame)
+        return m_viewportConfiguration.setDefaultConfiguration(parametersForStandardFrame());
 }
 
 #if ENABLE(TEXT_AUTOSIZING)
@@ -4870,7 +4895,7 @@ void WebPage::removeTextPlaceholder(const ElementContext& placeholder, Completio
 {
     if (auto element = elementForContext(placeholder)) {
         if (RefPtr frame = element->document().frame())
-            frame->editor().removeTextPlaceholder(checkedDowncast<TextPlaceholderElement>(*element));
+            frame->editor().removeTextPlaceholder(downcast<TextPlaceholderElement>(*element));
     }
     completionHandler();
 }

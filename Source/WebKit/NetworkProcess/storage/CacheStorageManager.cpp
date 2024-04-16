@@ -117,7 +117,7 @@ static bool writeCachesList(const String& cachesListDirectoryPath, const Vector<
         encoder << caches[index]->uniqueName();
     }
 
-    FileSystem::overwriteEntireFile(cachesListFilePath, std::span(const_cast<uint8_t*>(encoder.buffer()), encoder.bufferSize()));
+    FileSystem::overwriteEntireFile(cachesListFilePath, encoder.span());
     return true;
 }
 
@@ -134,7 +134,7 @@ static std::optional<uint64_t> readSizeFile(const String& sizeDirectoryPath)
     if (!buffer)
         return std::nullopt;
 
-    return parseInteger<uint64_t>({ buffer->data(), static_cast<unsigned>(buffer->size()) });
+    return parseInteger<uint64_t>(buffer->span());
 }
 
 static bool writeSizeFile(const String& sizeDirectoryPath, uint64_t size)

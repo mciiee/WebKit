@@ -35,6 +35,7 @@
 #include "WebProcess.h"
 #include <WebCore/RealtimeMediaSource.h>
 #include <WebCore/SpeechRecognitionCaptureSource.h>
+#include <wtf/CheckedRef.h>
 
 #if PLATFORM(COCOA)
 #include "SharedCARingBuffer.h"
@@ -56,6 +57,7 @@ using namespace WebCore;
 class SpeechRecognitionRealtimeMediaSourceManager::Source
     : private RealtimeMediaSource::Observer
     , private RealtimeMediaSource::AudioSampleObserver
+    , public CanMakeCheckedPtr<SpeechRecognitionRealtimeMediaSourceManager::Source>
 {
     WTF_MAKE_FAST_ALLOCATED;
 public:
@@ -85,6 +87,17 @@ public:
     }
 
 private:
+    // CheckedPtr interface
+    uint32_t ptrCount() const final { return CanMakeCheckedPtr::ptrCount(); }
+    void incrementPtrCount() const final { CanMakeCheckedPtr::incrementPtrCount(); }
+    void decrementPtrCount() const final { CanMakeCheckedPtr::decrementPtrCount(); }
+#if CHECKED_POINTER_DEBUG
+    void registerCheckedPtr(const void* pointer) const final { CanMakeCheckedPtr::registerCheckedPtr(pointer); };
+    void copyCheckedPtr(const void* source, const void* destination) const final { CanMakeCheckedPtr::copyCheckedPtr(source, destination); }
+    void moveCheckedPtr(const void* source, const void* destination) const final { CanMakeCheckedPtr::moveCheckedPtr(source, destination); }
+    void unregisterCheckedPtr(const void* pointer) const final { CanMakeCheckedPtr::unregisterCheckedPtr(pointer); }
+#endif // CHECKED_POINTER_DEBUG
+
     void sourceStopped() final
     {
         if (m_source->captureDidFail()) {

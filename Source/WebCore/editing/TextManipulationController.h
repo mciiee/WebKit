@@ -32,7 +32,6 @@
 #include "TextManipulationItem.h"
 #include <wtf/CheckedRef.h>
 #include <wtf/CompletionHandler.h>
-#include <wtf/EnumTraits.h>
 #include <wtf/ObjectIdentifier.h>
 #include <wtf/WeakHashSet.h>
 #include <wtf/WeakPtr.h>
@@ -43,7 +42,7 @@ class Document;
 class Element;
 class VisiblePosition;
 
-class TextManipulationController : public CanMakeWeakPtr<TextManipulationController>, public CanMakeCheckedPtr {
+class TextManipulationController : public CanMakeWeakPtr<TextManipulationController>, public CanMakeCheckedPtr<TextManipulationController> {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     TextManipulationController(Document&);

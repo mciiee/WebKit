@@ -513,7 +513,7 @@ public:
 
     LayoutRect maskClipRect(const LayoutPoint& paintOffset);
 
-    VisiblePosition positionForPoint(const LayoutPoint&, const RenderFragmentContainer*) override;
+    VisiblePosition positionForPoint(const LayoutPoint&, HitTestSource, const RenderFragmentContainer*) override;
 
     void removeFloatingAndInvalidateForLayout();
     void removeFloatingOrPositionedChildFromBlockLists();
@@ -585,7 +585,6 @@ public:
     virtual bool hasRelativeDimensions() const;
     virtual bool hasRelativeLogicalHeight() const;
     virtual bool hasRelativeLogicalWidth() const;
-    void willBeRemovedFromTree(IsInternalMove) override;
 
     bool hasHorizontalLayoutOverflow() const
     {

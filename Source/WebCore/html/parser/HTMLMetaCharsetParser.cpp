@@ -85,7 +85,7 @@ static StringView extractCharset(StringView value)
 bool HTMLMetaCharsetParser::processMeta(HTMLToken& token)
 {
     auto attributes = token.attributes().map([](auto& attribute) {
-        return std::pair { StringView { attribute.name.data(), static_cast<unsigned>(attribute.name.size()) }, StringView { attribute.value.data(), static_cast<unsigned>(attribute.value.size()) } };
+        return std::pair { StringView { attribute.name.span() }, StringView { attribute.value.span() } };
     });
     m_encoding = encodingFromMetaAttributes(attributes);
     return m_encoding.isValid();
@@ -155,7 +155,7 @@ bool HTMLMetaCharsetParser::checkForMetaCharset(std::span<const uint8_t> data)
     while (auto token = m_tokenizer.nextToken(m_input)) {
         bool isEnd = token->type() == HTMLToken::Type::EndTag;
         if (isEnd || token->type() == HTMLToken::Type::StartTag) {
-            auto knownTagName = AtomString::lookUp(token->name().data(), token->name().size());
+            auto knownTagName = AtomString::lookUp(token->name().span());
             if (!isEnd) {
                 m_tokenizer.updateStateFor(knownTagName);
                 if (knownTagName == metaTag && processMeta(*token)) {

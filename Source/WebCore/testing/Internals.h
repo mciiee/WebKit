@@ -44,6 +44,7 @@
 #include "TextIndicator.h"
 #include "VP9Utilities.h"
 #include <JavaScriptCore/Forward.h>
+#include <wtf/CheckedRef.h>
 
 #if ENABLE(VIDEO)
 #include "MediaElementSession.h"
@@ -78,7 +79,7 @@ class DOMRect;
 class DOMRectList;
 class DOMRectReadOnly;
 class DOMURL;
-class LocalDOMWindow;
+class DOMWindow;
 class Document;
 class Element;
 class EventListener;
@@ -185,6 +186,7 @@ class Internals final : public RefCounted<Internals>, private ContextDestruction
     , public RealtimeMediaSource::Observer
     , private RealtimeMediaSource::AudioSampleObserver
     , private RealtimeMediaSource::VideoFrameObserver
+    , public CanMakeCheckedPtr<Internals>
 #endif
     {
 public:
@@ -1322,7 +1324,7 @@ public:
         
     String highlightPseudoElementColor(const AtomString& highlightName, Element&);
 
-    String windowLocationHost(LocalDOMWindow&);
+    String windowLocationHost(DOMWindow&);
 
     String systemColorForCSSValue(const String& cssValue, bool useDarkModeAppearance, bool useElevatedUserInterfaceLevel);
 
@@ -1457,8 +1459,24 @@ public:
     Vector<PDFAnnotationRect> pdfAnnotationRectsForTesting(Element& pluginElement) const;
     void registerPDFTest(Ref<VoidCallback>&&, Element&);
 
+    const String& defaultSpatialTrackingLabel() const;
+
 private:
     explicit Internals(Document&);
+
+#if ENABLE(MEDIA_STREAM)
+    // CheckedPtr interface
+    uint32_t ptrCount() const final { return CanMakeCheckedPtr::ptrCount(); }
+    void incrementPtrCount() const final { CanMakeCheckedPtr::incrementPtrCount(); }
+    void decrementPtrCount() const final { CanMakeCheckedPtr::decrementPtrCount(); }
+#if CHECKED_POINTER_DEBUG
+    void registerCheckedPtr(const void* pointer) const final { CanMakeCheckedPtr::registerCheckedPtr(pointer); };
+    void copyCheckedPtr(const void* source, const void* destination) const final { CanMakeCheckedPtr::copyCheckedPtr(source, destination); }
+    void moveCheckedPtr(const void* source, const void* destination) const final { CanMakeCheckedPtr::moveCheckedPtr(source, destination); }
+    void unregisterCheckedPtr(const void* pointer) const final { CanMakeCheckedPtr::unregisterCheckedPtr(pointer); }
+#endif // CHECKED_POINTER_DEBUG
+#endif
+
     Document* contextDocument() const;
     LocalFrame* frame() const;
 

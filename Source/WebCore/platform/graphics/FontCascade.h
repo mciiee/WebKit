@@ -33,6 +33,7 @@
 #include "TextSpacing.h"
 #include <optional>
 #include <wtf/CheckedRef.h>
+#include <wtf/FastMalloc.h>
 #include <wtf/HashSet.h>
 #include <wtf/WeakPtr.h>
 #include <wtf/text/CharacterProperties.h>
@@ -107,7 +108,8 @@ public:
     void operator()(TextLayout*) const;
 };
 
-class FontCascade : public CanMakeWeakPtr<FontCascade>, public CanMakeCheckedPtr {
+class FontCascade : public CanMakeWeakPtr<FontCascade>, public CanMakeCheckedPtr<FontCascade> {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WEBCORE_EXPORT FontCascade();
     WEBCORE_EXPORT FontCascade(FontCascadeDescription&&);
@@ -137,14 +139,14 @@ public:
 
     float widthOfTextRange(const TextRun&, unsigned from, unsigned to, SingleThreadWeakHashSet<const Font>* fallbackFonts = nullptr, float* outWidthBeforeRange = nullptr, float* outWidthAfterRange = nullptr) const;
     WEBCORE_EXPORT float width(const TextRun&, SingleThreadWeakHashSet<const Font>* fallbackFonts = nullptr, GlyphOverflow* = nullptr) const;
-    float widthForSimpleText(StringView text, TextDirection = TextDirection::LTR) const;
+    float widthForTextUsingSimplifiedMeasuring(StringView text, TextDirection = TextDirection::LTR) const;
     WEBCORE_EXPORT float widthForSimpleTextWithFixedPitch(StringView text, bool whitespaceIsCollapsed) const;
 
     std::unique_ptr<TextLayout, TextLayoutDeleter> createLayout(RenderText&, float xPos, bool collapseWhiteSpace) const;
     static float width(TextLayout&, unsigned from, unsigned len, SingleThreadWeakHashSet<const Font>* fallbackFonts = nullptr);
     float widthOfSpaceString() const
     {
-        return width(TextRun { String { &space, 1 } });
+        return width(TextRun { StringView(WTF::span(space)) });
     }
 
     int offsetForPosition(const TextRun&, float position, bool includePartialGlyphs) const;
@@ -232,7 +234,7 @@ private:
     GlyphBuffer layoutSimpleText(const TextRun&, unsigned from, unsigned to, ForTextEmphasisOrNot = NotForTextEmphasis) const;
     void drawGlyphBuffer(GraphicsContext&, const GlyphBuffer&, FloatPoint&, CustomFontNotReadyAction) const;
     void drawEmphasisMarks(GraphicsContext&, const GlyphBuffer&, const AtomString&, const FloatPoint&) const;
-    float floatWidthForSimpleText(const TextRun&, SingleThreadWeakHashSet<const Font>* fallbackFonts = nullptr, GlyphOverflow* = nullptr) const;
+    float widthForTextUsingWidthIterator(const TextRun&, SingleThreadWeakHashSet<const Font>* fallbackFonts = nullptr, GlyphOverflow* = nullptr) const;
     int offsetForPositionForSimpleText(const TextRun&, float position, bool includePartialGlyphs) const;
     void adjustSelectionRectForSimpleText(const TextRun&, LayoutRect& selectionRect, unsigned from, unsigned to) const;
     WEBCORE_EXPORT float widthForSimpleTextSlow(StringView text, TextDirection, float*) const;
@@ -244,7 +246,7 @@ private:
     static bool canExpandAroundIdeographsInComplexText();
 
     GlyphBuffer layoutComplexText(const TextRun&, unsigned from, unsigned to, ForTextEmphasisOrNot = NotForTextEmphasis) const;
-    float floatWidthForComplexText(const TextRun&, SingleThreadWeakHashSet<const Font>* fallbackFonts = nullptr, GlyphOverflow* = nullptr) const;
+    float widthForTextUsingComplexTextController(const TextRun&, SingleThreadWeakHashSet<const Font>* fallbackFonts = nullptr, GlyphOverflow* = nullptr) const;
     int offsetForPositionForComplexText(const TextRun&, float position, bool includePartialGlyphs) const;
     void adjustSelectionRectForComplexText(const TextRun&, LayoutRect& selectionRect, unsigned from, unsigned to) const;
 
@@ -303,8 +305,8 @@ public:
         return character;
     }
 
-    static String normalizeSpaces(const LChar*, unsigned length);
-    static String normalizeSpaces(const UChar*, unsigned length);
+    static String normalizeSpaces(std::span<const LChar>);
+    static String normalizeSpaces(std::span<const UChar>);
     static String normalizeSpaces(StringView);
 
     bool useBackslashAsYenSymbol() const { return m_useBackslashAsYenSymbol; }
@@ -406,9 +408,9 @@ inline float FontCascade::tabWidth(const Font& font, const TabSize& tabSize, flo
     return result - (syntheticBoldInclusion == Font::SyntheticBoldInclusion::Exclude ? font.syntheticBoldOffset() : 0);
 }
 
-inline float FontCascade::widthForSimpleText(StringView text, TextDirection textDirection) const
+inline float FontCascade::widthForTextUsingSimplifiedMeasuring(StringView text, TextDirection textDirection) const
 {
-    if (text.isNull() || text.isEmpty())
+    if (text.isEmpty())
         return 0;
     ASSERT(codePath(TextRun(text)) != CodePath::Complex);
     float* cacheEntry = protectedFonts()->widthCache().add(text, std::numeric_limits<float>::quiet_NaN());

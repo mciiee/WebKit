@@ -44,6 +44,7 @@
 
 #if ENABLE(WK_WEB_EXTENSIONS)
 #include "WebExtensionController.h"
+#include "WebExtensionMatchPattern.h"
 #endif
 
 namespace API {
@@ -95,9 +96,29 @@ Ref<PageConfiguration> PageConfiguration::copy() const
     return copy;
 }
 
+void PageConfiguration::copyDataFrom(const PageConfiguration& other)
+{
+    m_data = other.m_data;
+}
+
 BrowsingContextGroup& PageConfiguration::browsingContextGroup() const
 {
     return m_data.browsingContextGroup.get();
+}
+
+void PageConfiguration::setBrowsingContextGroup(RefPtr<BrowsingContextGroup>&& group)
+{
+    m_data.browsingContextGroup = WTFMove(group);
+}
+
+RefPtr<WebKit::WebProcessProxy> PageConfiguration::openerProcess() const
+{
+    return m_data.openerProcess;
+}
+
+void PageConfiguration::setOpenerProcess(RefPtr<WebKit::WebProcessProxy>&& process)
+{
+    m_data.openerProcess = WTFMove(process);
 }
 
 WebProcessPool& PageConfiguration::processPool() const
@@ -151,6 +172,18 @@ void PageConfiguration::setWeakWebExtensionController(WebExtensionController* we
     m_data.weakWebExtensionController = webExtensionController;
 }
 #endif // ENABLE(WK_WEB_EXTENSIONS)
+
+
+HashSet<WTF::String> PageConfiguration::maskedURLSchemes() const
+{
+    if (m_data.maskedURLSchemesWasSet)
+        return m_data.maskedURLSchemes;
+#if ENABLE(WK_WEB_EXTENSIONS)
+    if (webExtensionController() || weakWebExtensionController())
+        return WebKit::WebExtensionMatchPattern::extensionSchemes();
+#endif
+    return { };
+}
 
 WebPageGroup* PageConfiguration::pageGroup()
 {
@@ -314,11 +347,13 @@ GPUProcessPreferencesForWebProcess PageConfiguration::preferencesForGPUProcess()
     return {
         preferences->webGLEnabled(),
         preferences->webGPUEnabled(),
+        preferences->webXREnabled(),
         preferences->useGPUProcessForDOMRenderingEnabled(),
 #if ENABLE(RE_DYNAMIC_CONTENT_SCALING)
         preferences->useCGDisplayListsForDOMRendering(),
 #endif
-        allowTestOnlyIPC()
+        allowTestOnlyIPC(),
+        preferences->lockdownFontParserEnabled()
     };
 }
 #endif

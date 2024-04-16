@@ -29,6 +29,7 @@
 #include "MessageReceiver.h"
 #include "MessageSender.h"
 #include <WebCore/FrameIdentifier.h>
+#include <WebCore/NowPlayingMetadataObserver.h>
 #include <wtf/CheckedRef.h>
 #include <wtf/CompletionHandler.h>
 #include <wtf/OptionSet.h>
@@ -1065,6 +1066,11 @@ public:
 #endif
 #endif // PLATFORM(IOS_FAMILY)
 
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+    void getTextIndicatorForID(WTF::UUID&, CompletionHandler<void(std::optional<WebCore::TextIndicatorData>&&)>&&);
+    void updateTextIndicatorStyleVisibilityForID(WTF::UUID&, bool, CompletionHandler<void()>&&);
+#endif
+
 #if ENABLE(DATA_DETECTION)
     void setDataDetectionResult(const DataDetectionResult&);
     void handleClickForDataDetectionResult(const WebCore::DataDetectorElementInfo&, const WebCore::IntPoint&);
@@ -1117,7 +1123,8 @@ public:
     void getSelectedRangeAsync(CompletionHandler<void(const EditingRange&)>&&);
     void characterIndexForPointAsync(const WebCore::IntPoint&, CompletionHandler<void(uint64_t)>&&);
     void firstRectForCharacterRangeAsync(const EditingRange&, CompletionHandler<void(const WebCore::IntRect&, const EditingRange&)>&&);
-    void setCompositionAsync(const String& text, const Vector<WebCore::CompositionUnderline>&, const Vector<WebCore::CompositionHighlight>&, const HashMap<String, Vector<WebCore::CharacterRange>>&, const EditingRange& selectionRange, const EditingRange& replacementRange);
+    void setCompositionAsync(const String& text, const Vector<WebCore::CompositionUnderline>&, const Vector<WebCore::CompositionHighlight>&, const EditingRange& selectionRange, const EditingRange& replacementRange);
+    void setWritingSuggestion(const String& text, const EditingRange& selectionRange);
     void confirmCompositionAsync();
 
     void setScrollPerformanceDataCollectionEnabled(bool);
@@ -1372,7 +1379,7 @@ public:
     void assistiveTechnologyMakeFirstResponder();
 
 #if ENABLE(MULTI_REPRESENTATION_HEIC)
-    void insertMultiRepresentationHEIC(NSData *);
+    void insertMultiRepresentationHEIC(NSData *, NSString *);
 #endif
 #endif
 
@@ -1863,7 +1870,6 @@ public:
     // For testing
     void clearWheelEventTestMonitor();
     void callAfterNextPresentationUpdate(CompletionHandler<void()>&&);
-    void callAfterNextPresentationUpdateAndLayerCommit(CompletionHandler<void()>&&);
 
     void didReachLayoutMilestone(OptionSet<WebCore::LayoutMilestone>);
 
@@ -2187,6 +2193,12 @@ public:
     CGRect appHighlightsOverlayRect();
 #endif
 
+#if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+    void removeTextIndicatorStyleForID(const WTF::UUID&);
+    void enableTextIndicatorStyleAfterElementWithID(const String& elementID, const WTF::UUID&);
+    void enableTextIndicatorStyleForElementWithID(const String& elementID, const WTF::UUID&);
+#endif
+
 #if ENABLE(MEDIA_STREAM)
     WebCore::CaptureSourceOrError createRealtimeMediaSourceForSpeechRecognition();
     void clearUserMediaPermissionRequestHistory(WebCore::PermissionName);
@@ -2229,10 +2241,12 @@ public:
 #endif
 
 #if ENABLE(UNIFIED_TEXT_REPLACEMENT)
+#if ENABLE(CONTEXT_MENUS)
+    bool canHandleSwapCharacters() const;
     void handleContextMenuSwapCharacters(WebCore::IntRect selectionBoundsInRootView);
+#endif
 
     void textReplacementSessionShowInformationForReplacementWithUUIDRelativeToRect(const WTF::UUID& sessionUUID, const WTF::UUID& replacementUUID, WebCore::IntRect selectionBoundsInRootView);
-
     void textReplacementSessionUpdateStateForReplacementWithUUID(const WTF::UUID& sessionUUID, WebTextReplacementDataState, const WTF::UUID& replacementUUID);
 #endif
 
@@ -2263,7 +2277,6 @@ public:
     WebProcessProxy* processForRegistrableDomain(const WebCore::RegistrableDomain&);
 
     void createRemoteSubframesInOtherProcesses(WebFrameProxy&, const String& frameName);
-    void broadcastFrameRemovalToOtherProcesses(IPC::Connection&, WebCore::FrameIdentifier);
     void broadcastMainFrameURLChangeToOtherProcesses(IPC::Connection&, const URL&);
 
     void addOpenedPage(WebPageProxy&);
@@ -2321,7 +2334,7 @@ public:
     void generateTestReport(const String& message, const String& group);
 
     void frameCreated(WebCore::FrameIdentifier, WebFrameProxy&);
-    void didDestroyFrame(WebCore::FrameIdentifier);
+    void didDestroyFrame(IPC::Connection&, WebCore::FrameIdentifier);
     void disconnectFramesFromPage();
 
     void didCommitLoadForFrame(WebCore::FrameIdentifier, FrameInfoData&&, WebCore::ResourceRequest&&, uint64_t navigationID, const String& mimeType, bool frameHasCustomContentProvider, WebCore::FrameLoadType, const WebCore::CertificateInfo&, bool usedLegacyTLS, bool wasPrivateRelayed, bool containsPluginDocument, WebCore::HasInsecureContent, WebCore::MouseEventPolicy, const UserData&);
@@ -2378,7 +2391,6 @@ public:
     void requestTargetedElement(WebCore::TargetedElementRequest&&, CompletionHandler<void(const Vector<Ref<API::TargetedElementInfo>>&)>&&);
 
     void requestTextExtraction(std::optional<WebCore::FloatRect>&& collectionRectInRootView, CompletionHandler<void(WebCore::TextExtraction::Item&&)>&&);
-    void requestRenderedTextForElementSelector(String&& selector, CompletionHandler<void(Expected<String, WebCore::ExceptionCode>&&)>&&);
 
 #if ENABLE(UNIFIED_TEXT_REPLACEMENT)
     void willBeginTextReplacementSession(const WTF::UUID&, WebUnifiedTextReplacementType, CompletionHandler<void(const Vector<WebUnifiedTextReplacementContextData>&)>&&);
@@ -2396,7 +2408,9 @@ public:
     void textReplacementSessionDidReceiveEditAction(const WTF::UUID&, WebKit::WebTextReplacementDataEditAction);
 #endif
 
+    void resetVisibilityAdjustmentsForTargetedElements(const Vector<Ref<API::TargetedElementInfo>>&, CompletionHandler<void(bool)>&&);
     void adjustVisibilityForTargetedElements(const Vector<Ref<API::TargetedElementInfo>>&, CompletionHandler<void(bool)>&&);
+    void numberOfVisibilityAdjustmentRects(CompletionHandler<void(uint64_t)>&&);
 
     void addConsoleMessage(WebCore::FrameIdentifier, JSC::MessageSource, JSC::MessageLevel, const String&, std::optional<WebCore::ResourceLoaderIdentifier> = std::nullopt);
 
@@ -2412,6 +2426,21 @@ public:
 
     bool hasValidAudibleActivity() const;
     bool hasAllowedToRunInTheBackgroundActivity() const;
+
+    template<typename M> void sendToProcessContainingFrame(std::optional<WebCore::FrameIdentifier>, M&&);
+
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    void setDefaultSpatialTrackingLabel(const String&);
+    const String& defaultSpatialTrackingLabel() const;
+    void updateDefaultSpatialTrackingLabel();
+#endif
+
+    void addNowPlayingMetadataObserver(const WebCore::NowPlayingMetadataObserver&);
+    void removeNowPlayingMetadataObserver(const WebCore::NowPlayingMetadataObserver&);
+    void setNowPlayingMetadataObserverForTesting(std::unique_ptr<WebCore::NowPlayingMetadataObserver>&&);
+    void nowPlayingMetadataChanged(const WebCore::NowPlayingMetadata&);
+
+    void didAdjustVisibilityWithSelectors(Vector<String>&&);
 
 private:
     std::optional<Vector<uint8_t>> getWebCryptoMasterKey();
@@ -2675,6 +2704,7 @@ private:
 #endif
 
     // Popup Menu.
+    void showPopupMenuFromFrame(WebCore::FrameIdentifier, const WebCore::IntRect&, uint64_t textDirection, Vector<WebPopupItem>&& items, int32_t selectedIndex, const PlatformPopupMenuData&);
     void showPopupMenu(const WebCore::IntRect& rect, uint64_t textDirection, const Vector<WebPopupItem>& items, int32_t selectedIndex, const PlatformPopupMenuData&);
     void hidePopupMenu();
 
@@ -2873,6 +2903,7 @@ private:
     void performSwitchHapticFeedback();
 
     void handleMessage(IPC::Connection&, const String& messageName, const UserData& messageBody);
+    void handleMessageWithAsyncReply(const String& messageName, const UserData& messageBody, CompletionHandler<void(UserData&&)>&&);
     void handleSynchronousMessage(IPC::Connection&, const String& messageName, const UserData& messageBody, CompletionHandler<void(UserData&&)>&&);
 
     void viewIsBecomingVisible();
@@ -2992,7 +3023,6 @@ private:
 
     template<typename F> decltype(auto) sendToWebPage(std::optional<WebCore::FrameIdentifier>, F&&);
     template<typename M, typename C> void sendToProcessContainingFrame(std::optional<WebCore::FrameIdentifier>, M&&, C&&);
-    template<typename M> void sendToProcessContainingFrame(std::optional<WebCore::FrameIdentifier>, M&&);
     template<typename M> IPC::ConnectionSendSyncResult<M> sendSyncToProcessContainingFrame(std::optional<WebCore::FrameIdentifier>, M&&);
 
     void sendPreventableTouchEvent(WebCore::FrameIdentifier, const NativeWebTouchEvent&);
@@ -3002,9 +3032,11 @@ private:
 
     void focusRemoteFrame(IPC::Connection&, WebCore::FrameIdentifier);
     void postMessageToRemote(WebCore::FrameIdentifier source, const String& sourceOrigin, WebCore::FrameIdentifier target, std::optional<WebCore::SecurityOriginData> targetOrigin, const WebCore::MessageWithMessagePorts&);
-    void renderTreeAsText(WebCore::FrameIdentifier, size_t baseIndent, OptionSet<WebCore::RenderAsTextFlag>, CompletionHandler<void(String&&)>&&);
+    void renderTreeAsTextForTesting(WebCore::FrameIdentifier, size_t baseIndent, OptionSet<WebCore::RenderAsTextFlag>, CompletionHandler<void(String&&)>&&);
+    void frameTextForTesting(WebCore::FrameIdentifier, CompletionHandler<void(String&&)>&&);
     void bindRemoteAccessibilityFrames(int processIdentifier, WebCore::FrameIdentifier, std::span<const uint8_t> dataToken, CompletionHandler<void(std::span<const uint8_t>, int)>&&);
     void updateRemoteFrameAccessibilityOffset(WebCore::FrameIdentifier, WebCore::IntPoint);
+    void documentURLForConsoleLog(WebCore::FrameIdentifier, CompletionHandler<void(const URL&)>&&);
 
     void setTextIndicatorFromFrame(WebCore::FrameIdentifier, WebCore::TextIndicatorData&&, uint64_t);
 
@@ -3528,6 +3560,13 @@ private:
 #endif
 
     std::unique_ptr<WebsitePoliciesData> m_mainFrameWebsitePoliciesData;
+
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    String m_defaultSpatialTrackingLabel;
+#endif
+
+    WeakHashSet<WebCore::NowPlayingMetadataObserver> m_nowPlayingMetadataObservers;
+    std::unique_ptr<WebCore::NowPlayingMetadataObserver> m_nowPlayingMetadataObserverForTesting;
 };
 
 } // namespace WebKit

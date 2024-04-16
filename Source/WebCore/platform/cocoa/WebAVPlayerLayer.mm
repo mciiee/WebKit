@@ -57,7 +57,7 @@ SOFT_LINK_CLASS_OPTIONAL(AVKit, __AVPlayerLayerView)
 #endif
 
 namespace WebCore {
-class WebAVPlayerLayerPresentationModelClient : public VideoPresentationModelClient {
+class WebAVPlayerLayerPresentationModelClient : public VideoPresentationModelClient, public CanMakeCheckedPtr<WebAVPlayerLayerPresentationModelClient> {
     WTF_MAKE_FAST_ALLOCATED(WebAVPlayerLayerPresentationModelClient);
 public:
     WebAVPlayerLayerPresentationModelClient(WebAVPlayerLayer* playerLayer)
@@ -65,6 +65,17 @@ public:
     {
     }
 private:
+    // CheckedPtr interface
+    uint32_t ptrCount() const final { return CanMakeCheckedPtr::ptrCount(); }
+    void incrementPtrCount() const final { CanMakeCheckedPtr::incrementPtrCount(); }
+    void decrementPtrCount() const final { CanMakeCheckedPtr::decrementPtrCount(); }
+#if CHECKED_POINTER_DEBUG
+    void registerCheckedPtr(const void* pointer) const final { CanMakeCheckedPtr::registerCheckedPtr(pointer); };
+    void copyCheckedPtr(const void* source, const void* destination) const final { CanMakeCheckedPtr::copyCheckedPtr(source, destination); }
+    void moveCheckedPtr(const void* source, const void* destination) const final { CanMakeCheckedPtr::moveCheckedPtr(source, destination); }
+    void unregisterCheckedPtr(const void* pointer) const final { CanMakeCheckedPtr::unregisterCheckedPtr(pointer); }
+#endif // CHECKED_POINTER_DEBUG
+
     void videoDimensionsChanged(const FloatSize& videoDimensions)
     {
         [m_playerLayer.get() setVideoDimensions:videoDimensions];

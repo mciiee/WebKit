@@ -704,7 +704,8 @@ void AXIsolatedTree::updateNodeProperties(AXCoreObject& axObject, const AXProper
             propertyMap.set(AXPropertyName::KeyShortcuts, axObject.keyShortcuts().isolatedCopy());
             break;
         case AXPropertyName::SelectedChildren:
-            propertyMap.set(AXPropertyName::SelectedChildren, axIDs(axObject.selectedChildren()));
+            if (auto selectedChildren = axObject.selectedChildren())
+                propertyMap.set(AXPropertyName::SelectedChildren, axIDs(*selectedChildren));
             break;
         case AXPropertyName::SupportsARIAOwns:
             propertyMap.set(AXPropertyName::SupportsARIAOwns, axObject.supportsARIAOwns());
@@ -770,7 +771,7 @@ void AXIsolatedTree::updateDependentProperties(AccessibilityObject& axObject)
     auto updateLabeledObjects = [this] (const AccessibilityObject& label) {
         auto labeledObjects = label.labelForObjects();
         for (const auto& labeledObject : labeledObjects) {
-            if (RefPtr axObject = checkedDowncast<AccessibilityObject>(labeledObject.get()))
+            if (RefPtr axObject = downcast<AccessibilityObject>(labeledObject.get()))
                 queueNodeUpdate(axObject->objectID(), NodeUpdateOptions::nodeUpdate());
         }
     };
@@ -1094,7 +1095,7 @@ void AXIsolatedTree::removeNode(const AccessibilityObject& axObject)
     if (labeledObjectIDs) {
         // Update the labeled objects since axObject is one of their labels and it is being removed.
         for (AXID labeledObjectID : *labeledObjectIDs) {
-            // The label/title of an isolated object is computed based on its AccessibilityText propperty, thus update it.
+            // The label/title of an isolated object is computed based on its AccessibilityText property, thus update it.
             queueNodeUpdate(labeledObjectID, { AXPropertyName::AccessibilityText });
         }
     }

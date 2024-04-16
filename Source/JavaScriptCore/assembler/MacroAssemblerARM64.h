@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -529,9 +529,39 @@ public:
         m_assembler.bic<32>(dest, src, mask);
     }
 
+    void clearBitsWithMaskLeftShift32(RegisterID n, RegisterID m, TrustedImm32 amount, RegisterID d)
+    {
+        m_assembler.bic<32>(d, n, m, Assembler::LSL, amount.m_value);
+    }
+
+    void clearBitsWithMaskRightShift32(RegisterID n, RegisterID m, TrustedImm32 amount, RegisterID d)
+    {
+        m_assembler.bic<32>(d, n, m, Assembler::ASR, amount.m_value);
+    }
+
+    void clearBitsWithMaskUnsignedRightShift32(RegisterID n, RegisterID m, TrustedImm32 amount, RegisterID d)
+    {
+        m_assembler.bic<32>(d, n, m, Assembler::LSR, amount.m_value);
+    }
+
     void clearBitsWithMask64(RegisterID src, RegisterID mask, RegisterID dest)
     {
         m_assembler.bic<64>(dest, src, mask);
+    }
+
+    void clearBitsWithMaskLeftShift64(RegisterID n, RegisterID m, TrustedImm32 amount, RegisterID d)
+    {
+        m_assembler.bic<64>(d, n, m, Assembler::LSL, amount.m_value);
+    }
+
+    void clearBitsWithMaskRightShift64(RegisterID n, RegisterID m, TrustedImm32 amount, RegisterID d)
+    {
+        m_assembler.bic<64>(d, n, m, Assembler::ASR, amount.m_value);
+    }
+
+    void clearBitsWithMaskUnsignedRightShift64(RegisterID n, RegisterID m, TrustedImm32 amount, RegisterID d)
+    {
+        m_assembler.bic<64>(d, n, m, Assembler::LSR, amount.m_value);
     }
 
     void orNot32(RegisterID src, RegisterID mask, RegisterID dest)
@@ -3879,14 +3909,35 @@ public:
         MacroAssemblerHelpers::load8OnCondition(*this, cond, left, getCachedMemoryTempRegisterIDAndInvalidate());
         return branch32(cond, memoryTempRegister, right8);
     }
-    
+
     Jump branch8(RelationalCondition cond, AbsoluteAddress left, TrustedImm32 right)
     {
         TrustedImm32 right8 = MacroAssemblerHelpers::mask8OnCondition(*this, cond, right);
         MacroAssemblerHelpers::load8OnCondition(*this, cond, left.m_ptr, getCachedMemoryTempRegisterIDAndInvalidate());
         return branch32(cond, memoryTempRegister, right8);
     }
-    
+
+    Jump branch16(RelationalCondition cond, Address left, TrustedImm32 right)
+    {
+        TrustedImm32 right16 = MacroAssemblerHelpers::mask16OnCondition(*this, cond, right);
+        MacroAssemblerHelpers::load16OnCondition(*this, cond, left, getCachedMemoryTempRegisterIDAndInvalidate());
+        return branch32(cond, memoryTempRegister, right16);
+    }
+
+    Jump branch16(RelationalCondition cond, BaseIndex left, TrustedImm32 right)
+    {
+        TrustedImm32 right16 = MacroAssemblerHelpers::mask16OnCondition(*this, cond, right);
+        MacroAssemblerHelpers::load16OnCondition(*this, cond, left, getCachedMemoryTempRegisterIDAndInvalidate());
+        return branch32(cond, memoryTempRegister, right16);
+    }
+
+    Jump branch16(RelationalCondition cond, AbsoluteAddress left, TrustedImm32 right)
+    {
+        TrustedImm32 right16 = MacroAssemblerHelpers::mask16OnCondition(*this, cond, right);
+        MacroAssemblerHelpers::load16OnCondition(*this, cond, left.m_ptr, getCachedMemoryTempRegisterIDAndInvalidate());
+        return branch32(cond, memoryTempRegister, right16);
+    }
+
     Jump branchTest32(ResultCondition cond, RegisterID reg, RegisterID mask)
     {
         if (reg == mask && (cond == Zero || cond == NonZero))
@@ -4711,6 +4762,14 @@ public:
         return PatchableJump(result);
     }
 
+    PatchableJump patchableBranch16(RelationalCondition cond, Address left, TrustedImm32 imm)
+    {
+        m_makeJumpPatchable = true;
+        Jump result = branch16(cond, left, imm);
+        m_makeJumpPatchable = false;
+        return PatchableJump(result);
+    }
+
     PatchableJump patchableBranchTest32(ResultCondition cond, RegisterID reg, TrustedImm32 mask = TrustedImm32(-1))
     {
         m_makeJumpPatchable = true;
@@ -4795,7 +4854,7 @@ public:
 
     // Miscellaneous operations:
 
-    void breakpoint(uint16_t imm = 0xc471)
+    void breakpoint(uint16_t imm = WTF_FATAL_CRASH_CODE)
     {
         m_assembler.brk(imm);
     }

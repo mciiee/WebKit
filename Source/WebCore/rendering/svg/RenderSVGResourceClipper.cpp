@@ -24,7 +24,6 @@
 #include "config.h"
 #include "RenderSVGResourceClipper.h"
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "ElementIterator.h"
 #include "Frame.h"
 #include "FrameView.h"
@@ -144,7 +143,7 @@ void RenderSVGResourceClipper::applyMaskClipping(PaintInfo& paintInfo, const Ren
     auto& context = paintInfo.context();
     GraphicsContextStateSaver stateSaver(context);
 
-    if (auto* referencedClipperRenderer = svgClipperResourceFromStyle())
+    if (CheckedPtr referencedClipperRenderer = svgClipperResourceFromStyle())
         referencedClipperRenderer->applyMaskClipping(paintInfo, targetRenderer, objectBoundingBox);
 
     AffineTransform contentTransform;
@@ -179,7 +178,7 @@ void RenderSVGResourceClipper::applyMaskClipping(PaintInfo& paintInfo, const Ren
         context.setCompositeOperation(CompositeOperator::SourceOver);
     }
 
-    layer()->paintSVGResourceLayer(context, contentTransform);
+    checkedLayer()->paintSVGResourceLayer(context, contentTransform);
 
     if (pushTransparencyLayer)
         context.endTransparencyLayer();
@@ -261,4 +260,3 @@ void RenderSVGResourceClipper::styleDidChange(StyleDifference diff, const Render
 
 }
 
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

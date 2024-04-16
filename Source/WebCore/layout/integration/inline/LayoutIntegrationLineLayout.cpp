@@ -229,13 +229,21 @@ void LineLayout::updateInlineContentDimensions()
     m_boxGeometryUpdater.setGeometriesForLayout();
 }
 
-void LineLayout::updateStyle(const RenderBoxModelObject& renderer, const RenderStyle& oldStyle)
+void LineLayout::updateStyle(const RenderObject& renderer)
 {
-    if (m_inlineContent) {
-        auto invalidation = Layout::InlineInvalidation { ensureLineDamage(), m_inlineContentCache.inlineItems().content(), m_inlineContent->displayContent() };
-        invalidation.styleChanged(m_boxTree.layoutBoxForRenderer(renderer), oldStyle);
+    BoxTree::updateStyle(renderer);
+}
+
+bool LineLayout::styleWillChange(const RenderElement& renderer, const RenderStyle& newStyle)
+{
+    if (!renderer.layoutBox()) {
+        ASSERT_NOT_REACHED();
+        return false;
     }
-    m_boxTree.updateStyle(renderer);
+    if (!m_inlineContent)
+        return false;
+
+    return Layout::InlineInvalidation { ensureLineDamage(), m_inlineContentCache.inlineItems().content(), m_inlineContent->displayContent() }.styleWillChange(*renderer.layoutBox(), newStyle);
 }
 
 void LineLayout::updateOverflow()
@@ -314,7 +322,7 @@ std::optional<LayoutRect> LineLayout::layout()
 {
     preparePlacedFloats();
 
-    auto isPartialLayout = m_lineDamage && m_lineDamage->start();
+    auto isPartialLayout = m_lineDamage && m_lineDamage->layoutStartPosition();
 
     auto clearInlineContentAndCacheBeforeFullLayoutIfNeeded = [&] {
         if (isPartialLayout)
@@ -323,10 +331,8 @@ std::optional<LayoutRect> LineLayout::layout()
         // should retain all the pieces of data required -and then we can destroy damaged content here instead of after
         // layout in constructContent.
         clearInlineContent();
-        if (m_lineDamage && (m_lineDamage->type() == Layout::InlineDamage::Type::NeedsContentUpdateAndLineLayout || m_lineDamage->type() == Layout::InlineDamage::Type::Invalid)) {
-            // We are converting partial layout to full. Let's invalidate caches.
+        if (m_lineDamage && m_lineDamage->reasons().contains(Layout::InlineDamage::Reason::StyleChange))
             releaseCaches();
-        }
         m_lineDamage = { };
     };
     clearInlineContentAndCacheBeforeFullLayoutIfNeeded();
@@ -340,14 +346,14 @@ std::optional<LayoutRect> LineLayout::layout()
     auto inlineContentConstraints = [&]() -> Layout::ConstraintsForInlineContent {
         if (!isPartialLayout || !m_inlineContent)
             return *m_inlineContentConstraints;
-        auto damagedLineIndex = m_lineDamage->start()->lineIndex;
+        auto damagedLineIndex = m_lineDamage->layoutStartPosition()->lineIndex;
         if (!damagedLineIndex)
             return *m_inlineContentConstraints;
         if (damagedLineIndex >= m_inlineContent->displayContent().lines.size()) {
             ASSERT_NOT_REACHED();
             return *m_inlineContentConstraints;
         }
-        auto constraintsForInFlowContent = Layout::ConstraintsForInFlowContent { m_inlineContentConstraints->horizontal(), m_lineDamage->start()->partialContentTop };
+        auto constraintsForInFlowContent = Layout::ConstraintsForInFlowContent { m_inlineContentConstraints->horizontal(), m_lineDamage->layoutStartPosition()->partialContentTop };
         return { constraintsForInFlowContent, m_inlineContentConstraints->visualLeft() };
     };
 
@@ -743,6 +749,8 @@ LayoutUnit LineLayout::lastLineLogicalBaseline() const
 
 Vector<LineAdjustment> LineLayout::adjustContentForPagination(const Layout::BlockLayoutState& blockLayoutState, bool isPartialLayout)
 {
+    ASSERT(!m_lineDamage);
+
     if (!m_inlineContent)
         return { };
 
@@ -757,7 +765,9 @@ Vector<LineAdjustment> LineLayout::adjustContentForPagination(const Layout::Bloc
 
     if (layoutRestartLineIndex) {
         auto invalidation = Layout::InlineInvalidation { ensureLineDamage(), m_inlineContentCache.inlineItems().content(), m_inlineContent->displayContent() };
-        invalidation.restartForPagination(*layoutRestartLineIndex, adjustments[*layoutRestartLineIndex].offset);
+        auto canRestart = invalidation.restartForPagination(*layoutRestartLineIndex, adjustments[*layoutRestartLineIndex].offset);
+        if (!canRestart)
+            m_lineDamage = { };
     }
 
     return adjustments;
@@ -920,6 +930,11 @@ const RenderObject& LineLayout::rendererForLayoutBox(const Layout::Box& layoutBo
     return m_boxTree.rendererForLayoutBox(layoutBox);
 }
 
+bool LineLayout::hasRendererForLayoutBox(const Layout::Box& layoutBox) const
+{
+    return m_boxTree.hasRendererForLayoutBox(layoutBox);
+}
+
 const Layout::ElementBox& LineLayout::rootLayoutBox() const
 {
     return m_boxTree.rootLayoutBox();
@@ -986,7 +1001,8 @@ bool LineLayout::hitTest(const HitTestRequest& request, HitTestResult& result, c
     LayerPaintScope layerPaintScope(m_boxTree, layerRenderer);
 
     for (auto& box : makeReversedRange(boxRange)) {
-        if (!box.isVisible())
+        bool visibleForHitTesting = request.userTriggered() ? box.isVisible() : box.isVisibleIgnoringUsedVisibility();
+        if (!visibleForHitTesting)
             continue;
 
         auto& renderer = m_boxTree.rendererForLayoutBox(box.layoutBox());

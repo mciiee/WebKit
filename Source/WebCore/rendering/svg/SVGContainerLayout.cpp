@@ -28,7 +28,6 @@
 #include "config.h"
 #include "SVGContainerLayout.h"
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "Logging.h"
 #include "RenderAncestorIterator.h"
 #include "RenderChildIterator.h"
@@ -93,7 +92,7 @@ void SVGContainerLayout::layoutChildren(bool containerNeedsLayout)
         if (needsLayout)
             child.setNeedsLayout(MarkOnlyThis);
 
-        if (auto* element = dynamicDowncast<RenderElement>(child)) {
+        if (CheckedPtr element = dynamicDowncast<RenderElement>(child)) {
             if (element->needsLayout())
                 element->layout();
 
@@ -236,4 +235,3 @@ bool SVGContainerLayout::transformToRootChanged(const RenderObject* ancestor)
 
 }
 
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

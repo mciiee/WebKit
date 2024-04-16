@@ -34,6 +34,8 @@
 #include "Timer.h"
 #include <functional>
 #include <objc/objc.h>
+#include <wtf/CheckedRef.h>
+#include <wtf/FastMalloc.h>
 #include <wtf/Forward.h>
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
@@ -51,7 +53,9 @@ class WebPlaybackSessionChangeObserver;
 
 class WEBCORE_EXPORT PlaybackSessionInterfaceIOS
     : public PlaybackSessionModelClient
-    , public RefCounted<PlaybackSessionInterfaceIOS> {
+    , public RefCounted<PlaybackSessionInterfaceIOS>
+    , public CanMakeCheckedPtr<PlaybackSessionInterfaceIOS> {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     void initialize();
     virtual void invalidate();
@@ -77,6 +81,9 @@ public:
     std::optional<MediaPlayerIdentifier> playerIdentifier() const;
     void setPlayerIdentifier(std::optional<MediaPlayerIdentifier>);
 
+    virtual void startObservingNowPlayingMetadata();
+    virtual void stopObservingNowPlayingMetadata();
+
 #if !RELEASE_LOG_DISABLED
     const void* logIdentifier() const;
     const Logger* loggerPtr() const;
@@ -85,11 +92,30 @@ public:
 #endif
 
 protected:
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    void updateSpatialTrackingLabel();
+#endif
+
     PlaybackSessionInterfaceIOS(PlaybackSessionModel&);
     PlaybackSessionModel* m_playbackSessionModel { nullptr };
 
 private:
+    // CheckedPtr interface
+    uint32_t ptrCount() const final;
+    void incrementPtrCount() const final;
+    void decrementPtrCount() const final;
+#if CHECKED_POINTER_DEBUG
+    void registerCheckedPtr(const void* pointer) const final;
+    void copyCheckedPtr(const void* source, const void* destination) const final;
+    void moveCheckedPtr(const void* source, const void* destination) const final;
+    void unregisterCheckedPtr(const void* pointer) const final;
+#endif // CHECKED_POINTER_DEBUG
+
     std::optional<MediaPlayerIdentifier> m_playerIdentifier;
+#if HAVE(SPATIAL_TRACKING_LABEL)
+    String m_spatialTrackingLabel;
+    String m_defaultSpatialTrackingLabel;
+#endif
 };
 
 } // namespace WebCore

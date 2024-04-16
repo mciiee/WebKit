@@ -25,13 +25,25 @@
 
 #import "config.h"
 
+#import "CGImagePixelReader.h"
 #import "PlatformUtilities.h"
+#import "TestUIDelegate.h"
 #import "TestWKWebView.h"
+#import <WebKit/WKFrameInfoPrivate.h>
+#import <WebKit/WKWebViewPrivate.h>
+#import <WebKit/_WKFrameTreeNode.h>
 #import <WebKit/_WKTargetedElementInfo.h>
 #import <WebKit/_WKTargetedElementRequest.h>
 
 @interface WKWebView (ElementTargeting)
+
 - (NSArray<_WKTargetedElementInfo *> *)targetedElementInfoAt:(CGPoint)point;
+- (BOOL)adjustVisibilityForTargets:(NSArray<_WKTargetedElementInfo *> *)targets;
+- (BOOL)resetVisibilityAdjustmentsForTargets:(NSArray<_WKTargetedElementInfo *> *)elements;
+- (void)expectSingleTargetedSelector:(NSString *)expectedSelector at:(CGPoint)point;
+
+@property (nonatomic, readonly) NSUInteger numberOfVisibilityAdjustmentRects;
+
 @end
 
 @implementation WKWebView (ElementTargeting)
@@ -50,6 +62,70 @@
     return result.autorelease();
 }
 
+- (BOOL)adjustVisibilityForTargets:(NSArray<_WKTargetedElementInfo *> *)targets
+{
+    __block BOOL result = NO;
+    __block bool done = false;
+    [self _adjustVisibilityForTargetedElements:targets completionHandler:^(BOOL success) {
+        result = success;
+        done = true;
+    }];
+    TestWebKitAPI::Util::run(&done);
+    return result;
+}
+
+- (NSUInteger)numberOfVisibilityAdjustmentRects
+{
+    __block NSUInteger result = 0;
+    __block bool done = false;
+    [self _numberOfVisibilityAdjustmentRectsWithCompletionHandler:^(NSUInteger count) {
+        result = count;
+        done = true;
+    }];
+    TestWebKitAPI::Util::run(&done);
+    return result;
+}
+
+- (BOOL)resetVisibilityAdjustmentsForTargets:(NSArray<_WKTargetedElementInfo *> *)elements
+{
+    __block BOOL result = NO;
+    __block bool done = false;
+    [self _resetVisibilityAdjustmentsForTargetedElements:elements completionHandler:^(BOOL success) {
+        result = success;
+        done = true;
+    }];
+    TestWebKitAPI::Util::run(&done);
+    return result;
+}
+
+- (void)expectSingleTargetedSelector:(NSString *)expectedSelector at:(CGPoint)point
+{
+    RetainPtr elements = [self targetedElementInfoAt:point];
+    EXPECT_EQ([elements count], 1U);
+    NSString *preferredSelector = [elements firstObject].selectors.firstObject;
+    EXPECT_WK_STREQ(preferredSelector, expectedSelector);
+}
+
+@end
+
+@interface _WKTargetedElementInfo (TestingAdditions)
+@property (nonatomic, readonly) NSArray<_WKFrameTreeNode *> *childFrames;
+@end
+
+@implementation _WKTargetedElementInfo (TestingAdditions)
+
+- (NSArray<_WKFrameTreeNode *> *)childFrames
+{
+    __block RetainPtr<NSArray<_WKFrameTreeNode *>> result;
+    __block bool done = false;
+    [self getChildFrames:^(NSArray<_WKFrameTreeNode *> *frames) {
+        result = frames;
+        done = true;
+    }];
+    TestWebKitAPI::Util::run(&done);
+    return result.autorelease();
+}
+
 @end
 
 namespace TestWebKitAPI {
@@ -59,29 +135,241 @@ TEST(ElementTargeting, BasicElementTargeting)
     auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600)]);
     [webView synchronouslyLoadTestPageNamed:@"element-targeting-1"];
 
-    auto elements = [webView targetedElementInfoAt:CGPointMake(150, 150)];
-    EXPECT_EQ(elements.count, 3U);
+    Util::waitForConditionWithLogging([&] {
+        return [[webView objectByEvaluatingJavaScript:@"window.subframeLoaded"] boolValue];
+    }, 5, @"Timed out waiting for subframes to finish loading.");
+
+    RetainPtr elements = [webView targetedElementInfoAt:CGPointMake(150, 150)];
+    EXPECT_EQ([elements count], 3U);
     {
-        EXPECT_EQ(elements[0].positionType, _WKTargetedElementPositionFixed);
-        EXPECT_WK_STREQ(".fixed.container", elements[0].selectors.firstObject);
-        EXPECT_TRUE([elements[0].renderedText containsString:@"The round pegs"]);
-        EXPECT_EQ(elements[0].renderedText.length, 70U);
-        EXPECT_EQ(elements[0].offsetEdges, _WKRectEdgeLeft | _WKRectEdgeTop);
+        auto element = [elements objectAtIndex:0];
+        EXPECT_EQ(element.positionType, _WKTargetedElementPositionFixed);
+        EXPECT_WK_STREQ(".fixed.container", element.selectors.firstObject);
+        EXPECT_TRUE([element.renderedText containsString:@"The round pegs"]);
+        EXPECT_EQ(element.renderedText.length, 70U);
+        EXPECT_EQ(element.offsetEdges, _WKRectEdgeLeft | _WKRectEdgeTop);
+
+        RetainPtr childFrames = [element childFrames];
+        EXPECT_EQ([childFrames count], 1U);
+
+        auto childFrame = [childFrames firstObject];
+        EXPECT_FALSE(childFrame.info.mainFrame);
+        EXPECT_WK_STREQ(childFrame.info.request.URL.lastPathComponent, "nested-frames.html");
+        EXPECT_WK_STREQ(childFrame.info._title, "Outer Subframe");
+        EXPECT_EQ(childFrame.childFrames.count, 1U);
+
+        auto nestedChildFrame = childFrame.childFrames.firstObject;
+        EXPECT_FALSE(nestedChildFrame.info.mainFrame);
+        EXPECT_FALSE(nestedChildFrame.info.mainFrame);
+        EXPECT_WK_STREQ(nestedChildFrame.info.request.URL.scheme, "about");
+        EXPECT_WK_STREQ(nestedChildFrame.info._title, "Inner Subframe");
+        EXPECT_EQ(nestedChildFrame.childFrames.count, 0U);
     }
     {
-        EXPECT_EQ(elements[1].positionType, _WKTargetedElementPositionAbsolute);
-        EXPECT_WK_STREQ("#absolute", elements[1].selectors.firstObject);
-        EXPECT_TRUE([elements[1].renderedText containsString:@"the crazy ones"]);
-        EXPECT_EQ(elements[1].renderedText.length, 64U);
-        EXPECT_EQ(elements[1].offsetEdges, _WKRectEdgeRight | _WKRectEdgeBottom);
+        auto element = [elements objectAtIndex:1];
+        EXPECT_EQ(element.positionType, _WKTargetedElementPositionAbsolute);
+        EXPECT_WK_STREQ("#absolute", element.selectors.firstObject);
+        EXPECT_TRUE([element.renderedText containsString:@"the crazy ones"]);
+        EXPECT_EQ(element.renderedText.length, 64U);
+        EXPECT_EQ(element.offsetEdges, _WKRectEdgeRight | _WKRectEdgeBottom);
+        EXPECT_EQ(element.childFrames.count, 0U);
     }
     {
-        EXPECT_EQ(elements[2].positionType, _WKTargetedElementPositionStatic);
-        EXPECT_WK_STREQ("MAIN > SECTION:first-of-type", elements[2].selectors.firstObject);
-        EXPECT_TRUE([elements[2].renderedText containsString:@"Lorem ipsum"]);
-        EXPECT_EQ(elements[2].renderedText.length, 896U);
-        EXPECT_EQ(elements[2].offsetEdges, _WKRectEdgeNone);
+        auto element = [elements objectAtIndex:2];
+        EXPECT_EQ(element.positionType, _WKTargetedElementPositionStatic);
+        EXPECT_WK_STREQ("MAIN > SECTION:first-of-type", element.selectors.firstObject);
+        EXPECT_TRUE([element.renderedText containsString:@"Lorem ipsum"]);
+        EXPECT_EQ(element.renderedText.length, 896U);
+        EXPECT_EQ(element.offsetEdges, _WKRectEdgeNone);
+        EXPECT_EQ(element.childFrames.count, 0U);
     }
+}
+
+TEST(ElementTargeting, NearbyOutOfFlowElements)
+{
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600)]);
+    [webView synchronouslyLoadTestPageNamed:@"element-targeting-2"];
+
+    RetainPtr elements = [webView targetedElementInfoAt:CGPointMake(100, 100)];
+    EXPECT_EQ([elements count], 5U);
+    EXPECT_TRUE([elements objectAtIndex:0].underPoint);
+    EXPECT_TRUE([elements objectAtIndex:1].underPoint);
+    EXPECT_FALSE([elements objectAtIndex:2].underPoint);
+    EXPECT_FALSE([elements objectAtIndex:3].underPoint);
+    EXPECT_FALSE([elements objectAtIndex:4].underPoint);
+    // The two elements that are directly hit-tested should take precedence over nearby elements.
+    EXPECT_WK_STREQ(".fixed.container", [elements firstObject].selectors.firstObject);
+    EXPECT_WK_STREQ(".box", [elements objectAtIndex:1].selectors.firstObject);
+    __auto_type nextThreeSelectors = [NSSet setWithArray:@[
+        [elements objectAtIndex:2].selectors.firstObject,
+        [elements objectAtIndex:3].selectors.firstObject,
+        [elements objectAtIndex:4].selectors.firstObject,
+    ]];
+    EXPECT_TRUE([nextThreeSelectors containsObject:@".absolute.top-right"]);
+    EXPECT_TRUE([nextThreeSelectors containsObject:@".absolute.bottom-left"]);
+    EXPECT_TRUE([nextThreeSelectors containsObject:@".absolute.bottom-right"]);
+
+    [webView adjustVisibilityForTargets:elements.get()];
+    EXPECT_EQ([webView numberOfVisibilityAdjustmentRects], 1U);
+
+    [webView resetVisibilityAdjustmentsForTargets:elements.get()];
+    EXPECT_EQ([webView numberOfVisibilityAdjustmentRects], 0U);
+}
+
+static std::pair<RetainPtr<TestWKWebView>, RetainPtr<Util::PlatformWindow>> setUpWebViewForSnapshotting(CGRect frame)
+{
+#if PLATFORM(IOS_FAMILY)
+    auto configuration = adoptNS([WKWebViewConfiguration new]);
+    RetainPtr webView = adoptNS([[TestWKWebView alloc] initWithFrame:frame configuration:configuration.get() addToWindow:NO]);
+    RetainPtr window = adoptNS([[UIWindow alloc] initWithFrame:frame]);
+    [window addSubview:webView.get()];
+    return { WTFMove(webView), WTFMove(window) };
+#else
+    RetainPtr webView = adoptNS([[TestWKWebView alloc] initWithFrame:frame]);
+    return { WTFMove(webView), { [webView window] } };
+#endif
+}
+
+TEST(ElementTargeting, AdjustVisibilityForUnparentedElement)
+{
+    auto webViewFrame = CGRectMake(0, 0, 800, 600);
+
+    auto viewAndWindow = setUpWebViewForSnapshotting(webViewFrame);
+    auto [webView, window] = viewAndWindow;
+    [webView synchronouslyLoadTestPageNamed:@"element-targeting-2"];
+
+    auto setOverlaysParented = [&](bool visible) {
+        [viewAndWindow.first objectByEvaluatingJavaScript:visible ? @"addOverlays()" : @"removeOverlays()"];
+    };
+
+    RetainPtr elements = [webView targetedElementInfoAt:CGPointMake(100, 100)];
+    setOverlaysParented(false);
+    [webView targetedElementInfoAt:CGPointMake(100, 100)];
+    [webView adjustVisibilityForTargets:elements.get()];
+    setOverlaysParented(true);
+
+    elements = [webView targetedElementInfoAt:CGPointMake(100, 100)];
+    setOverlaysParented(false);
+    [webView targetedElementInfoAt:CGPointMake(100, 100)];
+    [webView adjustVisibilityForTargets:elements.get()];
+    setOverlaysParented(true);
+
+    [webView waitForNextPresentationUpdate];
+    RetainPtr snapshot = [webView snapshotAfterScreenUpdates];
+    CGImagePixelReader pixelReader { snapshot.get() };
+
+    auto x = static_cast<unsigned>(100 * (pixelReader.width() / CGRectGetWidth(webViewFrame)));
+    auto y = static_cast<unsigned>(100 * (pixelReader.height() / CGRectGetHeight(webViewFrame)));
+    EXPECT_EQ(pixelReader.at(x, y), WebCore::Color::white);
+}
+
+TEST(ElementTargeting, AdjustVisibilityFromSelectors)
+{
+    auto webViewFrame = CGRectMake(0, 0, 800, 600);
+
+    auto [webView, window] = setUpWebViewForSnapshotting(webViewFrame);
+    RetainPtr preferences = adoptNS([WKWebpagePreferences new]);
+    [preferences _setVisibilityAdjustmentSelectors:[NSSet setWithObjects:
+        @".fixed.container"
+        , @".absolute.bottom-right"
+        , @".absolute.bottom-left"
+        , @".absolute.top-right"
+        , nil]];
+
+    RetainPtr delegate = adoptNS([TestUIDelegate new]);
+    RetainPtr adjustedSelectors = adoptNS([NSMutableSet new]);
+    [delegate setWebViewDidAdjustVisibilityWithSelectors:^(WKWebView *, NSArray<NSString *> *selectors) {
+        [adjustedSelectors addObjectsFromArray:selectors];
+    }];
+    [webView setUIDelegate:delegate.get()];
+    [webView synchronouslyLoadTestPageNamed:@"element-targeting-2" preferences:preferences.get()];
+    [webView waitForNextPresentationUpdate];
+    {
+        RetainPtr snapshot = [webView snapshotAfterScreenUpdates];
+        CGImagePixelReader pixelReader { snapshot.get() };
+        auto x = static_cast<unsigned>(100 * (pixelReader.width() / CGRectGetWidth(webViewFrame)));
+        auto y = static_cast<unsigned>(100 * (pixelReader.height() / CGRectGetHeight(webViewFrame)));
+        EXPECT_EQ(pixelReader.at(x, y), WebCore::Color::white);
+        EXPECT_EQ([webView numberOfVisibilityAdjustmentRects], 1U);
+        EXPECT_TRUE([adjustedSelectors containsObject:@".absolute.top-right"]);
+        EXPECT_TRUE([adjustedSelectors containsObject:@".absolute.bottom-right"]);
+        EXPECT_TRUE([adjustedSelectors containsObject:@".fixed.container"]);
+        EXPECT_TRUE([adjustedSelectors containsObject:@".absolute.bottom-left"]);
+    }
+
+    [webView resetVisibilityAdjustmentsForTargets:nil];
+    [webView waitForNextPresentationUpdate];
+    {
+        RetainPtr snapshot = [webView snapshotAfterScreenUpdates];
+        CGImagePixelReader pixelReader { snapshot.get() };
+        auto x = static_cast<unsigned>(100 * (pixelReader.width() / CGRectGetWidth(webViewFrame)));
+        auto y = static_cast<unsigned>(100 * (pixelReader.height() / CGRectGetHeight(webViewFrame)));
+        EXPECT_FALSE(pixelReader.at(x, y) == WebCore::Color::white);
+        EXPECT_EQ([webView numberOfVisibilityAdjustmentRects], 0U);
+    }
+}
+
+TEST(ElementTargeting, AdjustVisibilityFromPseudoSelectors)
+{
+    auto webViewFrame = CGRectMake(0, 0, 800, 600);
+
+    auto [webView, window] = setUpWebViewForSnapshotting(webViewFrame);
+    RetainPtr preferences = adoptNS([WKWebpagePreferences new]);
+    auto selectors = [NSSet setWithObjects:@"main::before", @"HTML::AFTER", nil];
+    [preferences _setVisibilityAdjustmentSelectors:selectors];
+    RetainPtr delegate = adoptNS([TestUIDelegate new]);
+    RetainPtr adjustedSelectors = adoptNS([NSMutableSet new]);
+    [delegate setWebViewDidAdjustVisibilityWithSelectors:^(WKWebView *, NSArray<NSString *> *selectors) {
+        [adjustedSelectors addObjectsFromArray:selectors];
+    }];
+    [webView setUIDelegate:delegate.get()];
+    [webView synchronouslyLoadTestPageNamed:@"element-targeting-3" preferences:preferences.get()];
+    [webView waitForNextPresentationUpdate];
+
+    RetainPtr snapshot = [webView snapshotAfterScreenUpdates];
+    CGImagePixelReader pixelReader { snapshot.get() };
+    auto x = static_cast<unsigned>(100 * (pixelReader.width() / CGRectGetWidth(webViewFrame)));
+    auto y = static_cast<unsigned>(100 * (pixelReader.height() / CGRectGetHeight(webViewFrame)));
+    EXPECT_EQ(pixelReader.at(x, y), WebCore::Color::white);
+    EXPECT_EQ([webView numberOfVisibilityAdjustmentRects], 1U);
+    EXPECT_TRUE([adjustedSelectors containsObject:@"main::before"]);
+    EXPECT_TRUE([adjustedSelectors containsObject:@"HTML::AFTER"]);
+}
+
+TEST(ElementTargeting, ContentInsideShadowRoot)
+{
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600)]);
+    [webView synchronouslyLoadTestPageNamed:@"element-targeting-4"];
+
+    RetainPtr elements = [webView targetedElementInfoAt:CGPointMake(100, 150)];
+    EXPECT_EQ([elements count], 1U);
+    EXPECT_TRUE([[elements firstObject].selectors containsObject:@"#container"]);
+}
+
+TEST(ElementTargeting, ParentRelativeSelectors)
+{
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600)]);
+    [webView synchronouslyLoadTestPageNamed:@"element-targeting-5"];
+    [webView expectSingleTargetedSelector:@"BODY > DIV:first-of-type" at:CGPointMake(100, 50)];
+    [webView expectSingleTargetedSelector:@"BODY > DIV:nth-child(3)" at:CGPointMake(100, 150)];
+    [webView expectSingleTargetedSelector:@"BODY > DIV:last-of-type" at:CGPointMake(100, 250)];
+    [webView expectSingleTargetedSelector:@"BODY > SECTION" at:CGPointMake(100, 350)];
+}
+
+TEST(ElementTargeting, TargetInFlowElements)
+{
+    auto center = CGPointMake(200, 200);
+    auto webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 400, 400)]);
+    [webView synchronouslyLoadTestPageNamed:@"element-targeting-6"];
+    [webView expectSingleTargetedSelector:@"MAIN > P:first-of-type" at:center];
+
+    [webView stringByEvaluatingJavaScript:@"scrollBy(0, 400)"];
+    [webView waitForNextPresentationUpdate];
+    [webView expectSingleTargetedSelector:@"IMG" at:center];
+
+    [webView stringByEvaluatingJavaScript:@"scrollBy(0, 400)"];
+    [webView waitForNextPresentationUpdate];
+    [webView expectSingleTargetedSelector:@".bottom-text" at:center];
 }
 
 } // namespace TestWebKitAPI

@@ -54,6 +54,10 @@
 #include "GraphicsContextGLGBMTextureMapper.h"
 #endif
 
+#if PLATFORM(GTK) || PLATFORM(WPE)
+#include "GLFence.h"
+#endif
+
 namespace WebCore {
 
 GraphicsContextGLANGLE::~GraphicsContextGLANGLE()
@@ -360,6 +364,10 @@ void GraphicsContextGLTextureMapperANGLE::prepareForDisplay()
 
     prepareTexture();
     swapCompositorTexture();
+
+#if PLATFORM(GTK) || PLATFORM(WPE)
+    m_frameFence = GLFence::create();
+#endif
 }
 
 GLContextWrapper::Type GraphicsContextGLTextureMapperANGLE::type() const
@@ -375,6 +383,19 @@ bool GraphicsContextGLTextureMapperANGLE::makeCurrentImpl()
 bool GraphicsContextGLTextureMapperANGLE::unmakeCurrentImpl()
 {
     return !!EGL_MakeCurrent(m_displayObj, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+}
+
+bool GraphicsContextGLTextureMapperANGLE::addFoveation(IntSize, IntSize, IntSize, std::span<const GCGLfloat>, std::span<const GCGLfloat>, std::span<const GCGLfloat>)
+{
+    return false;
+}
+
+void GraphicsContextGLTextureMapperANGLE::enableFoveation(GCGLuint)
+{
+}
+
+void GraphicsContextGLTextureMapperANGLE::disableFoveation()
+{
 }
 
 } // namespace WebCore

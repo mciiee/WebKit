@@ -71,6 +71,7 @@
 #import <WebCore/SecurityOrigin.h>
 #import <wtf/BlockPtr.h>
 #import <wtf/URL.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
 #if PLATFORM(IOS_FAMILY)
 #import "TapHandlingResult.h"
@@ -231,6 +232,8 @@ void UIDelegate::setDelegate(id <WKUIDelegate> delegate)
 
     m_delegateMethods.webViewUpdatedAppBadge = [delegate respondsToSelector:@selector(_webView:updatedAppBadge:fromSecurityOrigin:)];
     m_delegateMethods.webViewUpdatedClientBadge = [delegate respondsToSelector:@selector(_webView:updatedClientBadge:fromSecurityOrigin:)];
+
+    m_delegateMethods.webViewDidAdjustVisibilityWithSelectors = [delegate respondsToSelector:@selector(_webView:didAdjustVisibilityWithSelectors:)];
 }
 
 #if ENABLE(CONTEXT_MENUS)
@@ -319,11 +322,12 @@ void UIDelegate::UIClient::createNewPage(WebKit::WebPageProxy&, Ref<API::PageCon
     ASSERT(delegate);
 
     auto apiWindowFeatures = API::WindowFeatures::create(windowFeatures);
+    RefPtr openerProcess = configuration->openerProcess();
 
     if (m_uiDelegate->m_delegateMethods.webViewCreateWebViewWithConfigurationForNavigationActionWindowFeaturesAsync) {
         auto checker = CompletionHandlerCallChecker::create(delegate.get(), @selector(_webView:createWebViewWithConfiguration:forNavigationAction:windowFeatures:completionHandler:));
 
-        [(id<WKUIDelegatePrivate>)delegate _webView:m_uiDelegate->m_webView.get().get() createWebViewWithConfiguration:wrapper(configuration) forNavigationAction:wrapper(navigationAction) windowFeatures:wrapper(apiWindowFeatures) completionHandler:makeBlockPtr([completionHandler = WTFMove(completionHandler), checker = WTFMove(checker), relatedWebView = m_uiDelegate->m_webView.get()] (WKWebView *webView) mutable {
+        [(id<WKUIDelegatePrivate>)delegate _webView:m_uiDelegate->m_webView.get().get() createWebViewWithConfiguration:wrapper(configuration) forNavigationAction:wrapper(navigationAction) windowFeatures:wrapper(apiWindowFeatures) completionHandler:makeBlockPtr([completionHandler = WTFMove(completionHandler), checker = WTFMove(checker), relatedWebView = m_uiDelegate->m_webView.get(), openerProcess] (WKWebView *webView) mutable {
             if (checker->completionHandlerHasBeenCalled())
                 return;
             checker->didCallCompletionHandler();
@@ -334,6 +338,9 @@ void UIDelegate::UIClient::createNewPage(WebKit::WebPageProxy&, Ref<API::PageCon
             }
 
             if ([webView->_configuration _relatedWebView] != relatedWebView.get())
+                [NSException raise:NSInternalInconsistencyException format:@"Returned WKWebView was not created with the given configuration."];
+
+            if (openerProcess != webView->_configuration->_pageConfiguration->openerProcess())
                 [NSException raise:NSInternalInconsistencyException format:@"Returned WKWebView was not created with the given configuration."];
 
             completionHandler(webView->_page.get());
@@ -348,6 +355,8 @@ void UIDelegate::UIClient::createNewPage(WebKit::WebPageProxy&, Ref<API::PageCon
         return completionHandler(nullptr);
 
     if ([webView.get()->_configuration _relatedWebView] != m_uiDelegate->m_webView.get().get())
+        [NSException raise:NSInternalInconsistencyException format:@"Returned WKWebView was not created with the given configuration."];
+    if (openerProcess != webView.get()->_configuration->_pageConfiguration->openerProcess())
         [NSException raise:NSInternalInconsistencyException format:@"Returned WKWebView was not created with the given configuration."];
     completionHandler(webView->_page.get());
 }
@@ -1910,6 +1919,22 @@ void UIDelegate::UIClient::updateClientBadge(WebPageProxy&, const WebCore::Secur
 
     auto apiOrigin = API::SecurityOrigin::create(origin);
     [delegate _webView:m_uiDelegate->m_webView.get().get() updatedClientBadge:nsBadge fromSecurityOrigin:wrapper(apiOrigin.get())];
+}
+
+void UIDelegate::UIClient::didAdjustVisibilityWithSelectors(WebPageProxy&, Vector<String>&& selectors)
+{
+    if (!m_uiDelegate)
+        return;
+
+    if (!m_uiDelegate->m_delegateMethods.webViewDidAdjustVisibilityWithSelectors)
+        return;
+
+    auto delegate = (id<WKUIDelegatePrivate>)m_uiDelegate->m_delegate.get();
+    if (!delegate)
+        return;
+
+    RetainPtr nsSelectors = createNSArray(WTFMove(selectors));
+    [delegate _webView:m_uiDelegate->m_webView.get().get() didAdjustVisibilityWithSelectors:nsSelectors.get()];
 }
 
 #if ENABLE(WEBXR)

@@ -26,8 +26,13 @@
 #import "config.h"
 #import "_WKTargetedElementInfo.h"
 
+#import "APIFrameTreeNode.h"
+#import "WKObject.h"
+#import "WebPageProxy.h"
+#import "_WKFrameTreeNodeInternal.h"
 #import "_WKTargetedElementInfoInternal.h"
 #import <WebCore/WebCoreObjCExtras.h>
+#import <wtf/BlockPtr.h>
 #import <wtf/cocoa/VectorCocoa.h>
 
 @implementation _WKTargetedElementInfo
@@ -66,6 +71,16 @@
     return _info->boundsInRootView();
 }
 
+- (CGRect)boundsInWebView
+{
+    return _info->boundsInWebView();
+}
+
+- (CGRect)boundsInClientCoordinates
+{
+    return _info->boundsInClientCoordinates();
+}
+
 - (NSArray<NSString *> *)selectors
 {
     return createNSArray(_info->selectors()).autorelease();
@@ -91,9 +106,28 @@
     return edges;
 }
 
+- (void)getChildFrames:(void(^)(NSArray<_WKFrameTreeNode *> *))completion
+{
+    return _info->childFrames([completion = makeBlockPtr(completion)](auto&& nodes) {
+        completion(createNSArray(WTFMove(nodes), [](API::FrameTreeNode& node) {
+            return wrapper(node);
+        }).autorelease());
+    });
+}
+
 - (BOOL)isSameElement:(_WKTargetedElementInfo *)other
 {
     return _info->isSameElement(*other->_info);
+}
+
+- (BOOL)isUnderPoint
+{
+    return _info->isUnderPoint();
+}
+
+- (BOOL)isPseudoElement
+{
+    return _info->isPseudoElement();
 }
 
 @end
