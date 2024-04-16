@@ -43,7 +43,8 @@
                 pkg-config
 
                 #compiler
-                gcc
+                #gcc
+                clang
                 perl
                 ruby
                 python39
