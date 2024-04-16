@@ -48,7 +48,7 @@
                 #libraries
              ];
               shellHook =
-                'echo "Done flaking, starting to build" && Tools/Scripts/build-webkit --wincairo';
+                'echo "Done flaking, starting to build" && Tools/Scripts/build-webkit --debug --wincairo';
             };
         };
 }
