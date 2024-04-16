@@ -28,7 +28,8 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - uses: aldoborrero/use-nix-action@v4
 
       #- name: Create build directory
       #  run: mkdir build && cd build
@@ -37,10 +38,10 @@ jobs:
       #- name: Update apt
       #  run: sudo apt-get update && sudo apt-get upgrade -y
       
-      - name: Install nix
-        run: |
-          sh <(curl -L https://nixos.org/nix/install) --daemon
-          exec bash
+      #- name: Install nix
+      #  run: |
+      #    sh <(curl -L https://nixos.org/nix/install) --daemon
+      #    exec bash
       - name: Run flake
         run: nix develop --experimental-features 'nix-command flakes'
       
