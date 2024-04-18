@@ -63,7 +63,7 @@ jobs:
       #     sudo apt install perl
       #     sudo apt install python39
       # - run: Tools/Scripts/build-webkit --debug --wincairo
-
+      - run: git checkout webkit-2023.4-embargoed
       - uses: cachix/install-nix-action@v22
         with:
          nix_path: nixpkgs=channel:nixos-unstable
