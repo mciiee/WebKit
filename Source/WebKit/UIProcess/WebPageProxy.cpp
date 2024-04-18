@@ -396,6 +396,10 @@
 #include <wtf/spi/darwin/SandboxSPI.h>
 #endif
 
+#if PLATFORM(IOS_FAMILY)
+#import <pal/system/ios/Device.h>
+#endif
+
 #define MESSAGE_CHECK(process, assertion) MESSAGE_CHECK_BASE(assertion, process->connection())
 #define MESSAGE_CHECK_URL(process, url) MESSAGE_CHECK_BASE(checkURLReceivedFromCurrentOrPreviousWebProcess(process, url), process->connection())
 #define MESSAGE_CHECK_COMPLETION(process, assertion, completion) MESSAGE_CHECK_COMPLETION_BASE(assertion, process->connection(), completion)
@@ -1772,6 +1776,10 @@ RefPtr<API::Navigation> WebPageProxy::loadRequest(ResourceRequest&& request, Sho
 
     Ref navigation = m_navigationState->createLoadRequestNavigation(process().coreProcessIdentifier(), ResourceRequest(request), m_backForwardList->protectedCurrentItem());
 
+    auto navigationData = navigation->lastNavigationAction();
+    navigationData.isRequestFromClientOrUserInput = true;
+    navigation->setLastNavigationAction(WTFMove(navigationData));
+
     if (shouldForceForegroundPriorityForClientNavigation())
         navigation->setClientNavigationActivity(process().throttler().foregroundActivity("Client navigation"_s));
 
@@ -1815,7 +1823,7 @@ void WebPageProxy::loadRequestWithNavigationShared(Ref<WebProcessProxy>&& proces
     loadParameters.isNavigatingToAppBoundDomain = isNavigatingToAppBoundDomain;
     loadParameters.existingNetworkResourceLoadIdentifierToResume = existingNetworkResourceLoadIdentifierToResume;
     loadParameters.advancedPrivacyProtections = navigation.originatorAdvancedPrivacyProtections();
-    loadParameters.isRequestFromClientOrUserInput = navigation.isRequestFromClientOrUserInput() || shouldTreatAsContinuingLoad == ShouldTreatAsContinuingLoad::No;
+    loadParameters.isRequestFromClientOrUserInput = navigation.isRequestFromClientOrUserInput();
     maybeInitializeSandboxExtensionHandle(process, url, internals().pageLoadState.resourceDirectoryURL(), loadParameters.sandboxExtensionHandle);
 
     prepareToLoadWebPage(process, loadParameters);
@@ -1870,6 +1878,10 @@ RefPtr<API::Navigation> WebPageProxy::loadFile(const String& fileURLString, cons
     }
 
     Ref navigation = m_navigationState->createLoadRequestNavigation(process().coreProcessIdentifier(), ResourceRequest(fileURL), m_backForwardList->protectedCurrentItem());
+
+    auto navigationData = navigation->lastNavigationAction();
+    navigationData.isRequestFromClientOrUserInput = true;
+    navigation->setLastNavigationAction(WTFMove(navigationData));
 
     if (shouldForceForegroundPriorityForClientNavigation())
         navigation->setClientNavigationActivity(process().throttler().foregroundActivity("Client navigation"_s));
@@ -6699,15 +6711,17 @@ void WebPageProxy::didReceiveTitleForFrame(FrameIdentifier frameID, const String
 
     if (frame->isMainFrame()) {
         internals().pageLoadState.setTitle(transaction, title);
-        // FIXME: Ideally we'd enable this on iOS as well but this currently regresses PLT on iPhone.
-#if PLATFORM(MAC)
-        if (!internals().pageAllowedToRunInTheBackgroundActivityDueToTitleChanges && !frame->title().isNull() && frame->title() != title) {
+        // FIXME: Ideally we'd enable this on iPhone as well but this currently regresses PLT.
+        bool deviceClassIsSmallScreen = false;
+#if PLATFORM(IOS_FAMILY)
+        deviceClassIsSmallScreen = PAL::deviceClassIsSmallScreen();
+#endif
+        if (!deviceClassIsSmallScreen && !internals().pageAllowedToRunInTheBackgroundActivityDueToTitleChanges && !frame->title().isNull() && frame->title() != title) {
             WEBPAGEPROXY_RELEASE_LOG(ViewState, "didReceiveTitleForFrame: This page changes its title in the background and is allowed to run in the background");
             // This page updates its title in the background and is thus able to communicate with
             // the user while in the background. Allow it to run in the background.
             internals().pageAllowedToRunInTheBackgroundActivityDueToTitleChanges = process().throttler().backgroundActivity("Page updates its title"_s).moveToUniquePtr();
         }
-#endif
     }
 
     frame->didChangeTitle(title);

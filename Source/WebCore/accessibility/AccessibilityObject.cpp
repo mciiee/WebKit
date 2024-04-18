@@ -496,18 +496,28 @@ AccessibilityObject* AccessibilityObject::displayContentsParent() const
     return cache ? cache->getOrCreate(*parentNode) : nullptr;
 }
 
-AccessibilityObject* AccessibilityObject::previousSiblingUnignored(int limit) const
+AccessibilityObject* AccessibilityObject::nextSiblingUnignored(unsigned limit) const
 {
-    AccessibilityObject* previous;
-    ASSERT(limit >= 0);
-    for (previous = previousSibling(); previous && previous->accessibilityIsIgnored(); previous = previous->previousSibling()) {
-        limit--;
-        if (limit <= 0)
-            break;
+    ASSERT(limit);
+
+    for (auto sibling = iterator(nextSibling()); limit && sibling; --limit, ++sibling) {
+        if (!sibling->accessibilityIsIgnored())
+            return sibling.ptr();
     }
-    return previous;
+    return nullptr;
 }
-    
+
+AccessibilityObject* AccessibilityObject::previousSiblingUnignored(unsigned limit) const
+{
+    ASSERT(limit);
+
+    for (auto sibling = iterator(previousSibling()); limit && sibling; --limit, --sibling) {
+        if (!sibling->accessibilityIsIgnored())
+            return sibling.ptr();
+    }
+    return nullptr;
+}
+
 FloatRect AccessibilityObject::convertFrameToSpace(const FloatRect& frameRect, AccessibilityConversionSpace conversionSpace) const
 {
     ASSERT(isMainThread());
@@ -541,18 +551,6 @@ FloatRect AccessibilityObject::relativeFrame() const
     auto rect = elementRect();
     rect.moveBy(remoteFrameOffset());
     return convertFrameToSpace(rect, AccessibilityConversionSpace::Page);
-}
-
-AccessibilityObject* AccessibilityObject::nextSiblingUnignored(int limit) const
-{
-    AccessibilityObject* next;
-    ASSERT(limit >= 0);
-    for (next = nextSibling(); next && next->accessibilityIsIgnored(); next = next->nextSibling()) {
-        limit--;
-        if (limit <= 0)
-            break;
-    }
-    return next;
 }
 
 AccessibilityObject* AccessibilityObject::firstAccessibleObjectFromNode(const Node* node)
@@ -4268,20 +4266,15 @@ AXCoreObject::AccessibilityChildrenVector AccessibilityObject::ariaSelectedRows(
 
 AXCoreObject::AccessibilityChildrenVector AccessibilityObject::ariaListboxSelectedChildren()
 {
-    bool isMulti = isMultiSelectable();
-
     AccessibilityChildrenVector result;
+    bool isMulti = isMultiSelectable();
     for (const auto& child : children()) {
-        auto* axChild = dynamicDowncast<AccessibilityObject>(child.get());
-        // Every child should have aria-role option, and if so, check for selected attribute/state.
-        if (!axChild || axChild->ariaRoleAttribute() != AccessibilityRole::ListBoxOption)
+        if (!child->isListBoxOption() || !child->isSelected())
             continue;
 
-        if (axChild->isSelected() || axChild->isActiveDescendantOfFocusedContainer()) {
-            result.append(axChild);
-            if (!isMulti)
-                return result;
-        }
+        result.append(child);
+        if (!isMulti)
+            return result;
     }
     return result;
 }
@@ -4322,7 +4315,7 @@ std::optional<AXCoreObject::AccessibilityChildrenVector> AccessibilityObject::se
             return { { descendant } };
         break;
     case AccessibilityRole::ListBox:
-        // native list boxes would be AccessibilityListBoxes, so only check for aria list boxes
+        // Native list boxes would be AccessibilityListBoxes, so only check for aria list boxes.
         return ariaListboxSelectedChildren();
         break;
     case AccessibilityRole::Grid:
@@ -4334,10 +4327,12 @@ std::optional<AXCoreObject::AccessibilityChildrenVector> AccessibilityObject::se
         if (auto* selectedTab = selectedTabItem())
             return { { selectedTab } };
         break;
-    case AccessibilityRole::List:
-        if (auto* selectedListItem = this->selectedListItem())
-            return { { selectedListItem } };
+    case AccessibilityRole::List: {
+        auto selectedListItems = this->selectedListItems();
+        if (!selectedListItems.isEmpty())
+            return selectedListItems;
         break;
+    }
     case AccessibilityRole::Menu:
     case AccessibilityRole::MenuBar:
         if (auto* descendant = activeDescendant())
@@ -4352,21 +4347,14 @@ std::optional<AXCoreObject::AccessibilityChildrenVector> AccessibilityObject::se
     return std::nullopt;
 }
 
-AccessibilityObject* AccessibilityObject::selectedListItem()
+AXCoreObject::AccessibilityChildrenVector AccessibilityObject::selectedListItems()
 {
+    AccessibilityChildrenVector selectedListItems;
     for (const auto& child : children()) {
-        if (!child->isListItem())
-            continue;
-
-        auto* axObject = dynamicDowncast<AccessibilityObject>(child.get());
-        if (!axObject)
-            continue;
-
-        if (axObject->isSelected() || axObject->isActiveDescendantOfFocusedContainer())
-            return axObject;
+        if (child->isListItem() && child->isSelected())
+            selectedListItems.append(child);
     }
-    
-    return nullptr;
+    return selectedListItems;
 }
 
 AXCoreObject::AccessibilityChildrenVector AccessibilityObject::relatedObjects(AXRelationType relationType) const
@@ -4693,8 +4681,8 @@ static void appendChildrenToArray(RefPtr<AXCoreObject> object, bool isForward, R
         ASSERT(is<AccessibilityObject>(startObject));
         auto* newStartObject = dynamicDowncast<AccessibilityObject>(startObject.get());
         // Get the un-ignored sibling based on the search direction, and update the searchPosition.
-        while (newStartObject && newStartObject->accessibilityIsIgnored())
-            newStartObject = isForward ? newStartObject->previousSibling() : newStartObject->nextSibling();
+        if (newStartObject && newStartObject->accessibilityIsIgnored())
+            newStartObject = isForward ? newStartObject->previousSiblingUnignored() : newStartObject->nextSiblingUnignored();
         startObject = newStartObject;
     }
 
